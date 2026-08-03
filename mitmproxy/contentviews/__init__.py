@@ -43,6 +43,7 @@ from ._view_zip import zip
 from .base import View
 import mitmproxy_rs.contentviews
 from mitmproxy import flow
+from mitmproxy.firetoll.x402_contentview import x402_view
 from mitmproxy.utils import strutils
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ _views: list[Contentview] = [
     socket_io,
     urlencoded,
     wbxml,
+    x402_view,
     xml_html,
     zip,
 ]
