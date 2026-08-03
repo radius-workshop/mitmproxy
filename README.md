@@ -59,6 +59,22 @@ mitmproxy CA; install the CA in the macOS login keychain as shown above, then
 fully quit and restart Codex. Other terminal clients may instead honor
 `NODE_EXTRA_CA_CERTS` or another client-specific CA-bundle variable.
 
+#### Other agent CLIs (e.g. Hermes)
+
+Many Python-based agent CLIs build their own `httpx`/`requests` client and
+resolve a custom CA bundle from an environment variable rather than reading
+the OS trust store, so installing the CA in the keychain above is not
+sufficient for them. Check the client's docs or source for an app-specific
+variable (e.g. Hermes reads `HERMES_CA_BUNDLE`) before falling back to the
+more common `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE`:
+
+```console
+export HERMES_CA_BUNDLE="$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+```
+
+Set this in the same shell before launching the client; no keychain changes
+or restart are needed since the client reads the file directly.
+
 For an opt-in zsh setup, add this block to `~/.zshrc` and open a new shell:
 
 ```zsh
