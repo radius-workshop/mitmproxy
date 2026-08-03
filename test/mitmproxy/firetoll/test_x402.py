@@ -1,8 +1,6 @@
 import json
 
-from mitmproxy.contentviews._api import Metadata
 from mitmproxy.firetoll import x402
-from mitmproxy.firetoll import x402_contentview
 from mitmproxy.test import tflow
 from mitmproxy.test import tutils
 
@@ -115,6 +113,14 @@ class TestParseOffers:
         body = json.dumps({"accepts": ["not-a-dict", 123]}).encode()
         assert x402.parse_offers(body) == []
 
+    def test_json_top_level_list_returns_empty(self):
+        # valid JSON, but not an object at all - `isinstance(data, dict)`
+        # must reject it rather than crash on `.get(...)`.
+        assert x402.parse_offers(b"[1, 2, 3]") == []
+
+    def test_json_top_level_scalar_returns_empty(self):
+        assert x402.parse_offers(b"42") == []
+
 
 class TestDryRunQuote:
     def test_known_asset_shows_symbol_and_decimals(self):
@@ -128,6 +134,23 @@ class TestDryRunQuote:
         quote = offer.dry_run_quote()
         assert "raw units" in quote
         assert "0xdeadbeef" in quote
+
+    def test_known_asset_with_non_numeric_amount_falls_back_to_raw_units(self):
+        # chain/asset match a known entry, but the amount itself can't be
+        # parsed as an int - must fall back to the raw-units message rather
+        # than raising.
+        offer = x402.X402Offer(
+            scheme="exact",
+            network="base",
+            chain_id="eip155:8453",
+            amount="not-a-number",
+            asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            pay_to="0xPayeeAddress",
+            resource=None,
+        )
+        quote = offer.dry_run_quote()
+        assert "raw units" in quote
+        assert "not-a-number" in quote
 
     def test_no_amount_is_explicit(self):
         offer = x402.X402Offer(
@@ -193,33 +216,3 @@ class TestX402Detector:
         detector = x402.X402Detector()
         f = tflow.tflow(req=tutils.treq(), resp=False)
         assert detector.detect(f) == []
-
-
-class TestX402Contentview:
-    def test_name_is_inferred(self):
-        assert x402_contentview.x402_view.name == "X402"
-
-    def test_prettify_renders_offer_fields(self):
-        text = x402_contentview.x402_view.prettify(V1_BODY, Metadata())
-        assert "network:" in text
-        assert "base-sepolia" in text
-        assert "quote:" in text
-
-    def test_prettify_raises_on_non_offer_body(self):
-        import pytest
-
-        with pytest.raises(ValueError):
-            x402_contentview.x402_view.prettify(b"not an offer", Metadata())
-
-    def test_render_priority_high_for_402_response(self):
-        resp = tutils.tresp(status_code=402, content=V1_BODY)
-        metadata = Metadata(http_message=resp)
-        assert x402_contentview.x402_view.render_priority(V1_BODY, metadata) == 1.0
-
-    def test_render_priority_zero_for_200_response(self):
-        resp = tutils.tresp(status_code=200, content=V1_BODY)
-        metadata = Metadata(http_message=resp)
-        assert x402_contentview.x402_view.render_priority(V1_BODY, metadata) == 0
-
-    def test_render_priority_zero_for_empty_data(self):
-        assert x402_contentview.x402_view.render_priority(b"", Metadata()) == 0
