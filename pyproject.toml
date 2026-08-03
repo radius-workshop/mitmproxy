@@ -44,6 +44,7 @@ dependencies = [
     "hyperframe>=6.0,<=6.1.0",
     "kaitaistruct>=0.10,<=0.11",
     "ldap3>=2.8,<=2.9.1",
+    "mcp>=1.9.0,<2.0",  # firetoll-mcp; pinned below 2.0 for the stable FastMCP API
     "mitmproxy_rs>=0.12.6,<0.13",  # relaxed upper bound here: we control this
     "pydivert>=2.0.3,<=3.1.1; sys_platform == 'win32'",
     "pyOpenSSL>=24.3,<=27.0.0",
@@ -102,6 +103,7 @@ Issues = "https://github.com/mitmproxy/mitmproxy/issues"
 mitmproxy = "mitmproxy.tools.main:mitmproxy"
 mitmdump = "mitmproxy.tools.main:mitmdump"
 mitmweb = "mitmproxy.tools.main:mitmweb"
+firetoll-mcp = "mitmproxy.firetoll.mcp.server:main"
 
 [project.entry-points.pyinstaller40]
 hook-dirs = "mitmproxy.utils.pyinstaller:hook_dirs"
