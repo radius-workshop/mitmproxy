@@ -101,6 +101,62 @@ class TestExtractIdentifiers:
         f = tflow.tflow(req=tutils.treq(host="example.com", path="/"))
         assert trackers.extract_identifiers(f) == []
 
+    def test_json_body_list_of_shaped_strings_included(self):
+        value = "8f3a1c2d9e4b5f6a7c8d9e0f1a2b3c4d"
+        body = json.dumps({"ids": [value]}).encode()
+        f = tflow.tflow(
+            req=tutils.treq(
+                host="example.com",
+                path="/",
+                method=b"POST",
+                headers=[(b"content-type", b"application/json")],
+                content=body,
+            )
+        )
+        assert value in trackers.extract_identifiers(f)
+
+    def test_json_deeply_nested_value_ignored_past_depth_limit(self):
+        value = "8f3a1c2d9e4b5f6a7c8d9e0f1a2b3c4d"
+        body = json.dumps({"a": {"b": {"c": {"d": {"e": value}}}}}).encode()
+        f = tflow.tflow(
+            req=tutils.treq(
+                host="example.com",
+                path="/",
+                method=b"POST",
+                headers=[(b"content-type", b"application/json")],
+                content=body,
+            )
+        )
+        assert trackers.extract_identifiers(f) == []
+
+    def test_empty_body_yields_no_json_identifiers(self):
+        f = tflow.tflow(
+            req=tutils.treq(host="example.com", path="/", content=b""),
+            resp=False,
+        )
+        assert trackers.extract_identifiers(f) == []
+
+    def test_empty_query_param_value_skipped(self):
+        f = tflow.tflow(req=tutils.treq(host="example.com", path="/?foo="))
+        assert trackers.extract_identifiers(f) == []
+
+    def test_empty_request_cookie_value_skipped(self):
+        f = tflow.tflow(
+            req=tutils.treq(
+                host="example.com",
+                path="/",
+                headers=[(b"cookie", b"sid=")],
+            )
+        )
+        assert trackers.extract_identifiers(f) == []
+
+    def test_empty_response_cookie_value_skipped(self):
+        f = tflow.tflow(
+            req=tutils.treq(host="example.com", path="/"),
+            resp=tutils.tresp(headers=[(b"set-cookie", b"uid=; Path=/")]),
+        )
+        assert trackers.extract_identifiers(f) == []
+
     def test_detector_extract_identifiers_delegates(self):
         detector = trackers.TrackerDetector()
         value = "8f3a1c2d9e4b5f6a7c8d9e0f1a2b3c4d"

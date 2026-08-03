@@ -109,6 +109,25 @@ class TestProviderDetection:
         ]
         assert provider_findings == []
 
+    def test_provider_call_with_empty_bodies_and_no_response(self):
+        detector = agent_egress.AgentEgressDetector()
+        f = tflow.tflow(
+            req=tutils.treq(
+                host="api.anthropic.com",
+                path="/v1/messages",
+                method=b"POST",
+                content=b"",
+            ),
+            resp=False,
+        )
+        findings = detector.detect(f)
+        provider_findings = [x for x in findings if "inference call" in x.label]
+        assert len(provider_findings) == 1
+        finding = provider_findings[0]
+        assert finding.facts["request"] == {"bytes": 0}
+        assert finding.facts["response"] == {"bytes": 0}
+        assert "model" not in finding.facts
+
     def test_prompt_text_never_appears_in_facts(self):
         detector = agent_egress.AgentEgressDetector()
         body = json.dumps(
@@ -192,6 +211,20 @@ class TestMcpDetection:
         f = _flow(
             host="localhost",
             path="/api",
+            method=b"POST",
+            headers=[(b"content-type", b"application/json")],
+            content=body,
+        )
+        assert [x for x in detector.detect(f) if x.label.startswith("MCP")] == []
+
+    def test_unknown_jsonrpc_method_not_matched(self):
+        detector = agent_egress.AgentEgressDetector()
+        body = json.dumps(
+            {"jsonrpc": "2.0", "method": "notifications/message"}
+        ).encode()
+        f = _flow(
+            host="localhost",
+            path="/mcp",
             method=b"POST",
             headers=[(b"content-type", b"application/json")],
             content=body,

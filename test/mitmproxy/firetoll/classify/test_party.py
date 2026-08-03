@@ -50,3 +50,13 @@ class TestClassifyParty:
 
     def test_no_signal_is_unknown(self):
         assert party.classify_party("api.example.com") == "unknown"
+
+    def test_origin_without_host_falls_back_to_referer(self):
+        # Origin: null (sandboxed iframes, some redirects) has no hostname,
+        # so classify_party should skip it and use referer instead.
+        result = party.classify_party(
+            "api.example.com",
+            origin="null",
+            referer="https://app.example.com/page",
+        )
+        assert result == "first-party"

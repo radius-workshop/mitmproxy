@@ -83,6 +83,19 @@ class TestHeuristicMatch:
         )
         assert detector.detect(f) == []
 
+    def test_malformed_json_post_no_match(self):
+        detector = telemetry.TelemetryDetector()
+        f = tflow.tflow(
+            req=tutils.treq(
+                host="example.com",
+                path="/analytics",
+                method=b"POST",
+                headers=[(b"content-type", b"application/json")],
+                content=b"{not valid json",
+            )
+        )
+        assert detector.detect(f) == []
+
     def test_get_request_not_matched_by_heuristic(self):
         detector = telemetry.TelemetryDetector()
         body = json.dumps({"event": "signup", "distinct_id": "abc123"}).encode()

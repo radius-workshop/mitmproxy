@@ -53,6 +53,12 @@ class TestCloudflareDetection:
         assert findings[0].facts["vendor"] == "Cloudflare Turnstile"
 
 
+    def test_no_response_no_finding(self):
+        detector = botdetect.BotDetectDetector()
+        f = tflow.tflow(req=tutils.treq(), resp=False)
+        assert detector.detect(f) == []
+
+
 class TestCookieVendorDetection:
     def test_akamai_abck(self):
         detector = botdetect.BotDetectDetector()
