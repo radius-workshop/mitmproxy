@@ -50,6 +50,9 @@ Core mitmproxy should remain unchanged except for the intentional wiring and pac
 - `.github/workflows/main.yml`
 - `AGENTS.md`
 - `.mcp.json` and `.codex/config.toml` (per-agent MCP server definitions, see below)
+- `mitmproxy/utils/pyinstaller/hook-mitmproxy.firetoll.py` (bundles `data/*.yaml` into standalone binaries)
+- `test/mitmproxy/test_firetoll.py` (tests `firetoll/__init__.py`'s `firetoll_addons()`)
+- `uv.lock` and `web/src/js/ducks/_options_gen.ts` (generated files kept in sync with `pyproject.toml`/`options.py`)
 
 The CI diff-budget check in `mitmproxy/firetoll/ci_diff_budget.py` must be updated whenever another outside path is deliberately added. Do not broaden the exception casually.
 

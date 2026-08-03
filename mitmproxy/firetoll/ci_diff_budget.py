@@ -27,6 +27,10 @@ ALLOWED_PATHS = {
     ".github/workflows/main.yml",  # this gate itself
     ".mcp.json",  # Claude Code project-scoped firetoll-mcp definition
     ".codex/config.toml",  # Codex project-scoped firetoll-mcp definition
+    "mitmproxy/utils/pyinstaller/hook-mitmproxy.firetoll.py",  # bundles data/*.yaml
+    "test/mitmproxy/test_firetoll.py",  # tests firetoll/__init__.py's firetoll_addons()
+    "uv.lock",  # firetoll-mcp's mcp dependency and its transitive deps
+    "web/src/js/ducks/_options_gen.ts",  # generated bindings for firetoll_* options
 }
 
 EXCLUDED_PATH_PREFIXES = (
