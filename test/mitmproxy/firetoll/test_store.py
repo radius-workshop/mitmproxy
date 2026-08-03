@@ -1,3 +1,5 @@
+import asyncio
+import os
 import stat
 import time
 
@@ -14,6 +16,7 @@ def _mode(path) -> int:
 
 
 class TestStorePermissions:
+    @pytest.mark.skipif(os.name == "nt", reason="Skipping due to Windows")
     def test_directory_and_file_modes(self, tmp_path):
         db_path = tmp_path / "sub" / "session.sqlite"
         db = store.Store(db_path)
@@ -154,6 +157,20 @@ class TestStoreWrites:
             assert h1 != h2  # different per-session salt
         finally:
             db1.close()
+            db2.close()
+
+    def test_salt_persists_across_reopen(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        db1 = store.Store(db_path)
+        salt1 = db1._salt
+        db1.close()
+
+        db2 = store.Store(db_path)
+        try:
+            # Reopening an existing store must reuse the salt already
+            # persisted in `meta`, not mint a new one.
+            assert db2._salt == salt1
+        finally:
             db2.close()
 
     def test_increment_counter_rejects_unknown_name(self, tmp_path):
@@ -368,6 +385,120 @@ class TestBodiesAndAccessLog:
         finally:
             db.close()
 
+    def test_get_body_window_returns_slice_and_total_length(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            db.record_flow(
+                flow_id="f1",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+            )
+            db.record_body(
+                flow_id="f1",
+                part="response",
+                content=b"hello world",
+                truncated=False,
+                redacted=True,
+            )
+            content, truncated, redacted, total_bytes = db.get_body_window(
+                "f1", "response", offset=6, limit=5
+            )
+            assert content == b"world"
+            assert truncated is False
+            assert redacted is True
+            assert total_bytes == len(b"hello world")
+        finally:
+            db.close()
+
+    def test_get_body_window_missing_returns_none(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            assert db.get_body_window("nonexistent", "request", 0, 10) is None
+        finally:
+            db.close()
+
+    def test_list_body_metadata_all_and_filtered_by_flow(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            db.record_flow(
+                flow_id="f1",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+                created_at=100.0,
+            )
+            db.record_flow(
+                flow_id="f2",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/other",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+                created_at=200.0,
+            )
+            db.record_body(
+                flow_id="f1",
+                part="request",
+                content=b"aaa",
+                truncated=False,
+                redacted=True,
+            )
+            db.record_body(
+                flow_id="f2",
+                part="response",
+                content=b"bbbb",
+                truncated=True,
+                redacted=False,
+            )
+
+            all_rows = db.list_body_metadata()
+            assert len(all_rows) == 2
+            # newest flow first (ORDER BY f.created_at DESC)
+            assert all_rows[0][0] == "f2"
+            assert all_rows[1][0] == "f1"
+
+            filtered = db.list_body_metadata(flow_id="f1")
+            assert len(filtered) == 1
+            body_flow_id, part, content_bytes, truncated, redacted, created_at = (
+                filtered[0]
+            )
+            assert body_flow_id == "f1"
+            assert part == "request"
+            assert content_bytes == 3
+            assert truncated is False
+            assert redacted is True
+            assert created_at == 100.0
+        finally:
+            db.close()
+
+    def test_set_websocket_frames_captured(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            db.set_websocket_frames_captured(True)
+            (value,) = db.conn.execute(
+                "SELECT websocket_frames_captured FROM session WHERE id = 1"
+            ).fetchone()
+            assert value == 1
+
+            db.set_websocket_frames_captured(False)
+            (value,) = db.conn.execute(
+                "SELECT websocket_frames_captured FROM session WHERE id = 1"
+            ).fetchone()
+            assert value == 0
+        finally:
+            db.close()
+
     def test_record_access_and_list_access_log(self, tmp_path):
         db = store.Store(tmp_path / "session.sqlite")
         try:
@@ -558,3 +689,51 @@ class TestFiretollStoreAddon:
             tctx.options.firetoll_store_path = str(tmp_path / "should-not-exist.sqlite")
             addon.running()
             assert addon.db is None
+
+    @pytest.mark.asyncio
+    async def test_retention_loop_periodically_sweeps_old_flows(
+        self, tmp_path, monkeypatch
+    ):
+        # Real sweeps are 15 minutes apart; make the loop tick immediately
+        # so the test can observe a sweep happen without waiting.
+        monkeypatch.setattr(store, "RETENTION_SWEEP_INTERVAL", 0)
+
+        db_path = tmp_path / "addon.sqlite"
+        addon = store.FiretollStore()
+        with taddons.context(options.FiretollOptions(), addon) as tctx:
+            tctx.options.firetoll_store_path = str(db_path)
+            tctx.options.firetoll_retention_hours = 1
+            addon.running()
+
+            now = time.time()
+            addon.db.record_flow(
+                flow_id="old",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+                created_at=now - 999_999,
+            )
+
+            for _ in range(200):
+                await asyncio.sleep(0)
+                count = addon.db.conn.execute(
+                    "SELECT COUNT(*) FROM flows"
+                ).fetchone()[0]
+                if count == 0:
+                    break
+            assert count == 0
+
+            addon.done()
+            assert addon.db is None
+
+    @pytest.mark.asyncio
+    async def test_wipe_command_warns_when_no_open_store(self, caplog):
+        addon = store.FiretollStore()
+        with taddons.context(options.FiretollOptions(), addon) as tctx:
+            tctx.command(addon.wipe)
+        assert addon.db is None
+        assert "no open session store" in caplog.text
