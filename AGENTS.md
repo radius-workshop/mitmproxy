@@ -20,9 +20,10 @@ Useful focused Firetoll checks:
 ```console
 uv run pytest test/mitmproxy/firetoll
 uv run pytest test/mitmproxy/firetoll/test_attribution.py
-uv run pytest test/mitmproxy/firetoll/test_redact.py test/mitmproxy/firetoll/test_mcp_server.py
+uv run pytest test/mitmproxy/firetoll/test_redact.py test/mitmproxy/firetoll/mcp/test_server.py
 uv run pytest test/mitmproxy/firetoll/test_x402.py
 uv run pytest test/mitmproxy/firetoll/test_ci_diff_budget.py
+uv run pytest test/mitmproxy/firetoll/test_cli.py
 ```
 
 When adding or changing mitmproxy options, regenerate the checked-in web option bindings before testing:
@@ -92,6 +93,25 @@ uv run firetoll-mcp --store-path ~/.mitmproxy/firetoll/session.sqlite
 ```
 
 The proxy-side options are defined only in `mitmproxy/firetoll/options.py`. Do not register the same option elsewhere. `firetoll_body_access` controls what the MCP server may return; the MCP process cannot widen it.
+
+`firetoll` (console script, `mitmproxy/firetoll/cli.py`) reads the store directly and does not depend on `firetoll-mcp` running - `firetoll audit` in particular must never be routed through the MCP server, since auditing an agent by asking the agent is not an audit:
+
+```console
+uv run firetoll sessions
+uv run firetoll audit
+uv run firetoll flows --host api.anthropic.com
+uv run firetoll bodies --flow-id <id>
+```
+
+## Sessions and the audit trail
+
+Each time the store is opened for writing (`Store.__init__`), it inserts a new row into `sessions` and that row's id becomes `self.session_id` for the life of that process. `is_live()` reads that one row's `ended_at`. This is what makes `is_live` and `session_overview`'s totals trustworthy: a stale `ended_at` from a previous run can never leak into the row a new run is writing to, and a report scoped to `db.session_id` cannot silently become a multi-run aggregate. `ReadOnlyStore` defaults to the most recently started session, frozen for that process's lifetime.
+
+Every MCP tool call is written to `tool_log` (`Store.record_tool_call`/`list_tool_log`), not just `get_body`. `mcp/server.py`'s `_logged` decorator handles this for read-only tools; `get_body`/`get_body_range` log themselves explicitly so a refused (`body_access=none`) read is still recorded. Do not add a new tool without either the decorator or an explicit `record_tool_call`.
+
+`bodies.sha256`/`content_type`/`captured_at` let a claim about body content be checked against a fingerprint rather than trusted. `get_body` also returns `range_sha256`, the digest of exactly the bytes returned in that call. If you add a new body-bearing read path, populate these the same way `record_body` does.
+
+If you change the schema, update `_migrate_schema` in `store.py` too: it is the one place that brings an existing on-disk store forward, additively and idempotently (`ALTER TABLE ... ADD COLUMN`, never a destructive rewrite). Add a `TestSchemaMigration` case exercising the pre-migration shape, not just the fresh-install path.
 
 `.codex/config.toml` and `.mcp.json` both declare the same `firetoll` MCP server (`uv run firetoll-mcp`) so Codex and Claude Code discover it the same way. Keep the command/args identical across both files. Codex has no interactive approval step, so it needs the explicit `enabled = false` default; Claude Code's own per-project MCP approval prompt is the equivalent gate, so `.mcp.json` does not need (and cannot express) an `enabled` flag.
 

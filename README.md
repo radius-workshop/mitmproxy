@@ -125,7 +125,22 @@ Two checked-in, per-agent config files wire up the same `uv run firetoll-mcp` se
 - **Codex**: `.codex/config.toml` defines the `firetoll` server with `enabled = false`. Flip it to `true` to use it.
 - **Claude Code**: `.mcp.json` defines the same server. Claude Code prompts to approve project-scoped MCP servers the first time they're used, which is the equivalent opt-in gate.
 
-The server provides tools for session totals, attributed applications, flow queries, evidence-backed findings, identity joins, AI-agent activity, x402 offers, redaction rules, stored body metadata, bounded body reads, and the body-access audit log. `get_body` returns a 4 KiB window by default; use `offset` and `limit` or `get_body_range` for explicit bounded reads. `list_bodies` returns metadata without content. Reads are capped at 64 KiB per call and remain audit-logged.
+The server provides tools for session totals, attributed applications, flow queries, evidence-backed findings, identity joins, AI-agent activity, x402 offers, redaction rules, stored body metadata, bounded body reads, and the tool-call audit log. `get_body` returns a 4 KiB window by default; use `offset` and `limit` or `get_body_range` for explicit bounded reads. `list_bodies` returns metadata without content. Reads are capped at 64 KiB per call.
+
+Every tool call - not only `get_body` - is written to `tool_log`, readable through the `tool_log` tool or, without needing the MCP server running at all, via `firetoll audit` below. `session_overview` reports `is_live` and `session_id` for the run currently being written to, plus a list of every known session, so an agent orienting itself can never mistake a live capture for a finished one or a multi-run total for a single session's traffic. `get_body`/`list_bodies` also return each body's `sha256` (and, for a bounded read, `range_sha256` for exactly the bytes returned) so a specific claim can be checked against a fingerprint instead of taken on trust.
+
+### Auditing the agent without asking it
+
+`firetoll` is a separate, read-only console script over the same store, usable whether or not `firetoll-mcp` is running:
+
+```console
+uv run firetoll sessions
+uv run firetoll audit
+uv run firetoll flows --host api.anthropic.com
+uv run firetoll bodies --flow-id <id>
+```
+
+`firetoll audit` prints `tool_log` directly from the SQLite file. This is deliberate: an MCP server auditing itself, or an agent reporting its own past reads, is not independent evidence. `firetoll audit` reads the same file a raw `sqlite3`/`python3 -c 'import sqlite3...'` script would, which is also the honest limit of any of this: a process with filesystem access to the store can always read it directly, and that read will never appear in `tool_log`. `session_overview`'s `limits` field says so explicitly rather than implying a guarantee this design can't make.
 
 ### What Firetoll detects
 
@@ -187,6 +202,7 @@ mitmproxy/firetoll/
   x402.py               offer parsing, detection, and dry-run quotes
   x402_contentview.py   x402 content view
   mcp/server.py         separate read-only stdio MCP server
+  cli.py                separate read-only console script (`firetoll`), no MCP dependency
   data/                 bundled detector corpora
 test/mitmproxy/firetoll/ Firetoll unit and integration tests
 ```
