@@ -1,3 +1,5 @@
+import runpy
+
 import pytest
 
 from mitmproxy.firetoll import store
@@ -137,6 +139,10 @@ class TestQueryFlows:
         flows = server.query_flows(host="api.anthropic.com")
         assert flows[0]["app"] == "codex"
 
+    def test_filter_by_since(self, populated_db):
+        assert server.query_flows(since=0) != []
+        assert server.query_flows(since=4102444800.0) == []  # far future
+
 
 class TestGetFindings:
     def test_no_filters_returns_all(self, populated_db):
@@ -156,6 +162,11 @@ class TestGetFindings:
     def test_filter_by_app(self, populated_db):
         findings = server.get_findings(app="codex")
         assert len(findings) == 3
+
+    def test_filter_by_host(self, populated_db):
+        findings = server.get_findings(host="api.anthropic.com")
+        assert len(findings) == 3
+        assert server.get_findings(host="no-such-host.example") == []
 
     def test_filter_by_min_confidence_signature(self, populated_db):
         findings = server.get_findings(min_confidence="signature")
@@ -184,6 +195,40 @@ class TestAgentActivity:
 
         activity = server.agent_activity()
         assert "secret" not in json.dumps(activity)
+
+    def test_mcp_method_calls_are_tallied(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        writer = store.Store(path)
+        writer.record_flow(
+            flow_id="flow-mcp",
+            app_id=None,
+            method="POST",
+            host="mcp.example.com",
+            path="/",
+            status=200,
+            request_bytes=10,
+            response_bytes=20,
+        )
+        writer.record_finding(
+            "flow-mcp",
+            Finding(
+                cls="agent_egress",
+                label="MCP call",
+                confidence="signature",
+                evidence=["method=tools/call"],
+                facts={"method": "tools/call"},
+            ),
+        )
+        writer.close()
+
+        reader = store.ReadOnlyStore(path)
+        server._db = reader
+        try:
+            activity = server.agent_activity()
+            assert activity["mcp_calls"] == {"tools/call": 1}
+        finally:
+            reader.close()
+            server._db = None
 
 
 class TestX402Offers:
@@ -278,6 +323,12 @@ class TestListBodies:
     def test_filters_by_flow(self, populated_db):
         assert server.list_bodies(flow_id="missing") == []
 
+    def test_invalid_limit_raises(self, populated_db):
+        with pytest.raises(ValueError):
+            server.list_bodies(limit=0)
+        with pytest.raises(ValueError):
+            server.list_bodies(limit=1001)
+
 
 class TestAccessLog:
     def test_empty_by_default(self, populated_db):
@@ -288,3 +339,42 @@ class TestAccessLog:
         log = server.access_log()
         assert len(log) == 1
         assert log[0]["flow_id"] == "flow-1"
+
+
+class TestMain:
+    def test_opens_store_runs_and_closes(self, tmp_path, monkeypatch):
+        path = tmp_path / "session.sqlite"
+        store.Store(path).close()
+
+        run_calls = []
+        monkeypatch.setattr(server.FastMCP, "run", lambda self: run_calls.append(self))
+
+        closed = []
+        real_close = store.ReadOnlyStore.close
+        monkeypatch.setattr(
+            store.ReadOnlyStore,
+            "close",
+            lambda self: (closed.append(self), real_close(self)),
+        )
+
+        try:
+            server.main(["--store-path", str(path)])
+            assert len(run_calls) == 1
+            assert server._db is not None
+            assert closed == [server._db]
+        finally:
+            server._db = None
+
+    def test_dunder_main_invokes_main(self, tmp_path, monkeypatch):
+        path = tmp_path / "session.sqlite"
+        store.Store(path).close()
+
+        monkeypatch.setattr(server.FastMCP, "run", lambda self: None)
+        monkeypatch.setattr(
+            "sys.argv", ["firetoll-mcp", "--store-path", str(path)]
+        )
+
+        try:
+            runpy.run_path(server.__file__, run_name="__main__")
+        finally:
+            server._db = None
