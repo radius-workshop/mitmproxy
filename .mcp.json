@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "firetoll": {
+      "command": "uv",
+      "args": ["run", "firetoll-mcp"]
+    }
+  }
+}
