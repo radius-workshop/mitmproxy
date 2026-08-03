@@ -105,6 +105,14 @@ class TestEnrichOrchestrator:
             a.running()
             assert len(a.detectors) >= 1
 
+    def test_running_skips_loading_detectors_when_disabled(self):
+        a = enrich.Enrich()
+        with _context(a) as tctx:
+            tctx.configure(a)
+            tctx.options.firetoll = False
+            a.running()
+            assert a.detectors == []
+
 
 class _StubIdentifierDetector(_StubDetector):
     def __init__(self, values):

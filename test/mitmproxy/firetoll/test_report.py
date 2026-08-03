@@ -50,6 +50,19 @@ def _populated_store(tmp_path) -> store.Store:
     return db
 
 
+class TestAppLabel:
+    def test_user_agent_source_falls_back_to_process(self):
+        assert report._app_label("user-agent", "Mozilla/5.0", None) == "Mozilla/5.0"
+
+    def test_user_agent_source_with_no_process_is_unattributed(self):
+        assert report._app_label("user-agent", None, None) == "unattributed"
+
+    def test_process_with_parent_is_annotated(self):
+        assert (
+            report._app_label("process", "codex", "zsh") == "codex (via zsh)"
+        )
+
+
 class TestBuildReport:
     def test_totals(self, tmp_path):
         db = _populated_store(tmp_path)
@@ -160,6 +173,25 @@ class TestRenderers:
         finally:
             db.close()
 
+    def test_render_text_with_no_findings_shows_none(self, tmp_path):
+        db = store.Store(tmp_path / "empty.sqlite")
+        try:
+            r = report.build_report(db)
+            text = report.render_text(r)
+            assert "  (none)" in text
+        finally:
+            db.close()
+
+    def test_render_text_shows_websocket_capture_on(self, tmp_path):
+        db = _populated_store(tmp_path)
+        try:
+            db.set_websocket_frames_captured(True)
+            r = report.build_report(db)
+            text = report.render_text(r)
+            assert "WebSocket frame capture: on" in text
+        finally:
+            db.close()
+
 
 class TestFiretollReportAddon:
     def test_command_writes_json_and_markdown(self, tmp_path):
@@ -191,6 +223,18 @@ class TestFiretollReportAddon:
         with _context(addon):
             addon.report()  # must not raise
 
+    def test_command_strips_existing_json_suffix_from_path(self, tmp_path):
+        db = _populated_store(tmp_path)
+        store_addon = store.FiretollStore()
+        store_addon.db = db
+        addon = report.FiretollReport(store_addon)
+        with _context(addon):
+            out = tmp_path / "out.json"
+            addon.report(str(out))
+            assert (tmp_path / "out.json").exists()
+            assert (tmp_path / "out.md").exists()
+        db.close()
+
     def test_done_hook_respects_firetoll_report_option(self, tmp_path):
         db = _populated_store(tmp_path)
         store_addon = store.FiretollStore()
@@ -199,4 +243,26 @@ class TestFiretollReportAddon:
         with _context(addon) as tctx:
             tctx.options.firetoll_report = False
             addon.done()  # must not raise, and should be a no-op
+        db.close()
+
+    def test_done_hook_with_no_store_is_a_noop(self):
+        addon = report.FiretollReport(None)
+        with _context(addon) as tctx:
+            tctx.options.firetoll = True
+            tctx.options.firetoll_report = True
+            addon.done()  # must not raise
+
+    def test_done_hook_writes_exports_when_enabled(self, tmp_path):
+        db = _populated_store(tmp_path)
+        store_addon = store.FiretollStore()
+        store_addon.db = db
+        addon = report.FiretollReport(store_addon)
+        with _context(addon) as tctx:
+            tctx.options.firetoll = True
+            tctx.options.firetoll_report = True
+            out = tmp_path / "done-out"
+            tctx.options.firetoll_report_path = str(out)
+            addon.done()
+            assert (tmp_path / "done-out.json").exists()
+            assert (tmp_path / "done-out.md").exists()
         db.close()
