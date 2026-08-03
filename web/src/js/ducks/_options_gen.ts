@@ -24,6 +24,15 @@ export interface OptionsState {
     dns_name_servers: string[];
     dns_use_hosts_file: boolean;
     export_preserve_original_ip: boolean;
+    firetoll: boolean;
+    firetoll_attribution: boolean;
+    firetoll_body_access: string;
+    firetoll_corpus_dir: string;
+    firetoll_report: boolean;
+    firetoll_report_path: string;
+    firetoll_retention_hours: number;
+    firetoll_store_bodies: boolean;
+    firetoll_store_path: string;
     hardump: string;
     http2: boolean;
     http2_ping_keepalive: number;
@@ -131,6 +140,15 @@ export const defaultState: OptionsState = {
     dns_name_servers: [],
     dns_use_hosts_file: true,
     export_preserve_original_ip: false,
+    firetoll: true,
+    firetoll_attribution: true,
+    firetoll_body_access: "redacted",
+    firetoll_corpus_dir: "",
+    firetoll_report: false,
+    firetoll_report_path: "",
+    firetoll_retention_hours: 24,
+    firetoll_store_bodies: false,
+    firetoll_store_path: "",
     hardump: "",
     http2: true,
     http2_ping_keepalive: 58,
