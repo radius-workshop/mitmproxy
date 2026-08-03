@@ -1,0 +1,64 @@
+# Firetoll ad/marketing tracker corpus.
+#
+# Original list, not derived from EasyList/EasyPrivacy or any other
+# GPL/CC-BY-SA blocklists must not be vendored into this corpus.
+# Extend or override by pointing --set firetoll_corpus_dir=<dir> at a
+# directory containing your own trackers.yaml with the same shape; entries
+# are appended to, not replacing, this file.
+#
+# The headline computation isn't this list - it's identity_join detection,
+# which needs no corpus at all: it flags any identifier value the store
+# observes under two or more distinct eTLD+1s.
+
+vendors:
+  - name: DoubleClick / Google Ads
+    hosts:
+      - doubleclick.net
+      - googleadservices.com
+    host_suffixes:
+      - .doubleclick.net
+      - .g.doubleclick.net
+
+  - name: Meta Pixel
+    hosts:
+      - connect.facebook.net
+      - www.facebook.com
+    path_patterns:
+      - "^/tr/?$"
+
+  - name: TikTok Pixel
+    hosts:
+      - analytics.tiktok.com
+      - business-api.tiktok.com
+
+  - name: Snap Pixel
+    hosts:
+      - tr.snapchat.com
+
+  - name: LinkedIn Insight
+    hosts:
+      - px.ads.linkedin.com
+      - snap.licdn.com
+
+  - name: Microsoft Advertising (UET)
+    hosts:
+      - bat.bing.com
+
+  - name: Criteo
+    hosts:
+      - dis.criteo.com
+      - static.criteo.net
+    host_suffixes:
+      - .criteo.com
+
+  - name: Taboola
+    hosts:
+      - trc.taboola.com
+    host_suffixes:
+      - .taboola.com
+
+  - name: Outbrain
+    hosts:
+      - amplify.outbrain.com
+    host_suffixes:
+      - .outbrain.com

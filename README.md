@@ -1,41 +1,210 @@
 # mitmproxy
 
 [![Continuous Integration Status](https://github.com/mitmproxy/mitmproxy/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/mitmproxy/mitmproxy/actions?query=branch%3Amain)
-[![autofix.ci: enabled](https://shields.mitmproxy.org/badge/autofix.ci-yes-success?logo=data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjZmZmIiB2aWV3Qm94PSIwIDAgMTI4IDEyOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCB0cmFuc2Zvcm09InNjYWxlKDAuMDYxLC0wLjA2MSkgdHJhbnNsYXRlKC0yNTAsLTE3NTApIiBkPSJNMTMyNSAtMzQwcS0xMTUgMCAtMTY0LjUgMzIuNXQtNDkuNSAxMTQuNXEwIDMyIDUgNzAuNXQxMC41IDcyLjV0NS41IDU0djIyMHEtMzQgLTkgLTY5LjUgLTE0dC03MS41IC01cS0xMzYgMCAtMjUxLjUgNjJ0LTE5MSAxNjl0LTkyLjUgMjQxcS05MCAxMjAgLTkwIDI2NnEwIDEwOCA0OC41IDIwMC41dDEzMiAxNTUuNXQxODguNSA4MXExNSA5OSAxMDAuNSAxODAuNXQyMTcgMTMwLjV0MjgyLjUgNDlxMTM2IDAgMjU2LjUgLTQ2IHQyMDkgLTEyNy41dDEyOC41IC0xODkuNXExNDkgLTgyIDIyNyAtMjEzLjV0NzggLTI5OS41cTAgLTEzNiAtNTggLTI0NnQtMTY1LjUgLTE4NC41dC0yNTYuNSAtMTAzLjVsLTI0MyAtMzAwdi01MnEwIC0yNyAzLjUgLTU2LjV0Ni41IC01Ny41dDMgLTUycTAgLTg1IC00MS41IC0xMTguNXQtMTU3LjUgLTMzLjV6TTEzMjUgLTI2MHE3NyAwIDk4IDE0LjV0MjEgNTcuNXEwIDI5IC0zIDY4dC02LjUgNzN0LTMuNSA0OHY2NGwyMDcgMjQ5IHEtMzEgMCAtNjAgNS41dC01NCAxMi41bC0xMDQgLTEyM3EtMSAzNCAtMiA2My41dC0xIDU0LjVxMCA2OSA5IDEyM2wzMSAyMDBsLTExNSAtMjhsLTQ2IC0yNzFsLTIwNSAyMjZxLTE5IC0xNSAtNDMgLTI4LjV0LTU1IC0yNi41bDIxOSAtMjQydi0yNzZxMCAtMjAgLTUuNSAtNjB0LTEwLjUgLTc5dC01IC01OHEwIC00MCAzMCAtNTMuNXQxMDQgLTEzLjV6TTEyNjIgNjE2cS0xMTkgMCAtMjI5LjUgMzQuNXQtMTkzLjUgOTYuNWw0OCA2NCBxNzMgLTU1IDE3MC41IC04NXQyMDQuNSAtMzBxMTM3IDAgMjQ5IDQ1LjV0MTc5IDEyMXQ2NyAxNjUuNWg4MHEwIC0xMTQgLTc3LjUgLTIwNy41dC0yMDggLTE0OXQtMjg5LjUgLTU1LjV6TTgwMyA1OTVxODAgMCAxNDkgMjkuNXQxMDggNzIuNWwyMjEgLTY3bDMwOSA4NnE0NyAtMzIgMTA0LjUgLTUwdDExNy41IC0xOHE5MSAwIDE2NSAzOHQxMTguNSAxMDMuNXQ0NC41IDE0Ni41cTAgNzYgLTM0LjUgMTQ5dC05NS41IDEzNHQtMTQzIDk5IHEtMzcgMTA3IC0xMTUuNSAxODMuNXQtMTg2IDExNy41dC0yMzAuNSA0MXEtMTAzIDAgLTE5Ny41IC0yNnQtMTY5IC03Mi41dC0xMTcuNSAtMTA4dC00MyAtMTMxLjVxMCAtMzQgMTQuNSAtNjIuNXQ0MC41IC01MC41bC01NSAtNTlxLTM0IDI5IC01NCA2NS41dC0yNSA4MS41cS04MSAtMTggLTE0NSAtNzB0LTEwMSAtMTI1LjV0LTM3IC0xNTguNXEwIC0xMDIgNDguNSAtMTgwLjV0MTI5LjUgLTEyM3QxNzkgLTQ0LjV6Ii8+PC9zdmc+)](https://autofix.ci)
-[![Coverage Status](https://shields.mitmproxy.org/codecov/c/github/mitmproxy/mitmproxy/main.svg?label=codecov)](https://codecov.io/gh/mitmproxy/mitmproxy)
-[![Latest Version](https://shields.mitmproxy.org/pypi/v/mitmproxy.svg)](https://pypi.python.org/pypi/mitmproxy)
-[![Supported Python versions](https://shields.mitmproxy.org/pypi/pyversions/mitmproxy.svg)](https://pypi.python.org/pypi/mitmproxy)
 
-``mitmproxy`` is an interactive, SSL/TLS-capable intercepting proxy with a console
-interface for HTTP/1, HTTP/2, and WebSockets.
+`mitmproxy` is an interactive, SSL/TLS-capable intercepting proxy with interfaces for HTTP/1, HTTP/2, WebSockets, and more.
 
-``mitmdump`` is the command-line version of mitmproxy. Think tcpdump for HTTP.
+- `mitmproxy` — interactive terminal interface
+- `mitmdump` — command-line capture and replay interface
+- `mitmweb` — web interface
 
-``mitmweb`` is a web-based interface for mitmproxy.
+Install and general documentation are available at [mitmproxy.org](https://mitmproxy.org/) and [docs.mitmproxy.org](https://docs.mitmproxy.org/stable/). To develop from source, read [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Installation
+## Firetoll
 
-The installation instructions are [here](https://docs.mitmproxy.org/stable/overview-installation).
-If you want to install from source, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+This fork includes Firetoll: an observe-only traffic enrichment layer that makes a mitmproxy session queryable by a human or an AI agent. It adds process attribution, detector-backed findings, privacy-aware session storage, terminal/JSON/Markdown reports, and a separate MCP server.
 
-## Documentation & Help
+Firetoll never changes proxied traffic. A detector failure is isolated and cannot fail a flow. Findings are attached to `flow.metadata["firetoll.findings"]`, so they survive `.mitm` serialization.
 
-General information, tutorials, and precompiled binaries can be found on the mitmproxy website.
+### Quick start
 
-[![mitmproxy.org](https://shields.mitmproxy.org/badge/https%3A%2F%2F-mitmproxy.org-blue.svg)](https://mitmproxy.org/)
+Run the proxy separately from the MCP server. Firetoll is enabled by default and writes its session database to `~/.mitmproxy/firetoll/session.sqlite`.
 
-The documentation for mitmproxy is available on our website:
+```console
+uv run mitmdump
+```
 
-[![mitmproxy documentation stable](https://shields.mitmproxy.org/badge/docs-stable-brightgreen.svg)](https://docs.mitmproxy.org/stable/)
-[![mitmproxy documentation dev](https://shields.mitmproxy.org/badge/docs-dev-brightgreen.svg)](https://docs.mitmproxy.org/dev/)
+The regular proxy listens on `http://127.0.0.1:8080`. Applications must be
+explicitly configured to use it; starting `firetoll-mcp` does not start a
+proxy listener or discover applications by itself. For example, configure a
+terminal shell and the commands launched from it with:
 
-If you have questions on how to use mitmproxy, please
-use GitHub Discussions!
+```console
+export HTTP_PROXY=http://127.0.0.1:8080
+export HTTPS_PROXY=http://127.0.0.1:8080
+export http_proxy="$HTTP_PROXY"
+export https_proxy="$HTTPS_PROXY"
+```
 
-[![mitmproxy discussions](https://shields.mitmproxy.org/badge/help-github%20discussions-orange.svg)](https://github.com/mitmproxy/mitmproxy/discussions)
+On macOS, HTTPS clients must trust mitmproxy's interception CA. After the
+proxy has generated `~/.mitmproxy/mitmproxy-ca-cert.pem`, trust it in the
+login keychain:
 
-## Contributing
+```console
+security add-trusted-cert \
+  -d \
+  -r trustRoot \
+  -k "$HOME/Library/Keychains/login.keychain-db" \
+  "$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+```
 
-As an open source project, mitmproxy welcomes contributions of all forms.
+Restart the client after installing the CA. An `UnknownIssuer` error means
+the application reached the proxy but does not yet trust this certificate.
 
-[![Dev Guide](https://shields.mitmproxy.org/badge/dev_docs-CONTRIBUTING.md-blue)](./CONTRIBUTING.md)
+#### OpenAI Codex CLI
+
+The `codex` command starts a native Rust binary behind its Node launcher. As a
+result, `NODE_EXTRA_CA_CERTS` alone is not sufficient for Codex to trust the
+mitmproxy CA; install the CA in the macOS login keychain as shown above, then
+fully quit and restart Codex. Other terminal clients may instead honor
+`NODE_EXTRA_CA_CERTS` or another client-specific CA-bundle variable.
+
+#### Other agent CLIs (e.g. Hermes)
+
+Many Python-based agent CLIs build their own `httpx`/`requests` client and
+resolve a custom CA bundle from an environment variable rather than reading
+the OS trust store, so installing the CA in the keychain above is not
+sufficient for them. Check the client's docs or source for an app-specific
+variable (e.g. Hermes reads `HERMES_CA_BUNDLE`) before falling back to the
+more common `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE`:
+
+```console
+export HERMES_CA_BUNDLE="$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+```
+
+Set this in the same shell before launching the client; no keychain changes
+or restart are needed since the client reads the file directly.
+
+For an opt-in zsh setup, add this block to `~/.zshrc` and open a new shell:
+
+```zsh
+export MITMPROXY_ENABLED=0
+if [[ "$MITMPROXY_ENABLED" == "1" ]]; then
+  export HTTP_PROXY="http://127.0.0.1:8080"
+  export HTTPS_PROXY="$HTTP_PROXY"
+  export ALL_PROXY="$HTTP_PROXY"
+  export http_proxy="$HTTP_PROXY"
+  export https_proxy="$HTTPS_PROXY"
+  export all_proxy="$ALL_PROXY"
+else
+  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+fi
+```
+
+Set `MITMPROXY_ENABLED=1` to enable proxying for newly opened shells, or
+`MITMPROXY_ENABLED=0` to disable it. The terminal emulator itself is not the
+traffic source; commands and applications launched from its shell inherit the
+proxy environment.
+
+To verify the path without relying on an application-specific client:
+
+```console
+curl https://example.com
+```
+
+During an interactive session, use `firetoll.report`. To export both formats, set a base path:
+
+```console
+mitmdump \
+  --set firetoll_report=true \
+  --set firetoll_report_path=/tmp/firetoll-session
+```
+
+This writes `/tmp/firetoll-session.json` and `/tmp/firetoll-session.md`.
+
+### MCP access
+
+`firetoll-mcp` is a separate stdio process. It opens the SQLite store read-only, never runs in the proxy data path, and cannot broaden the capture policy after the session was recorded. Enable it only when a session exists and you intend to expose that session to an agent.
+
+```console
+uv run firetoll-mcp --store-path ~/.mitmproxy/firetoll/session.sqlite
+```
+
+Two checked-in, per-agent config files wire up the same `uv run firetoll-mcp` server so it works out of the box in either coding tool, gated behind that tool's own opt-in mechanism:
+
+- **Codex**: `.codex/config.toml` defines the `firetoll` server with `enabled = false`. Flip it to `true` to use it.
+- **Claude Code**: `.mcp.json` defines the same server. Claude Code prompts to approve project-scoped MCP servers the first time they're used, which is the equivalent opt-in gate.
+
+The server provides tools for session totals, attributed applications, flow queries, evidence-backed findings, identity joins, AI-agent activity, x402 offers, redaction rules, stored body metadata, bounded body reads, and the tool-call audit log. `get_body` returns a 4 KiB window by default; use `offset` and `limit` or `get_body_range` for explicit bounded reads. `list_bodies` returns metadata without content. Reads are capped at 64 KiB per call.
+
+Every tool call - not only `get_body` - is written to `tool_log`, readable through the `tool_log` tool or, without needing the MCP server running at all, via `firetoll audit` below. `session_overview` reports `is_live` and `session_id` for the run currently being written to, plus a list of every known session, so an agent orienting itself can never mistake a live capture for a finished one or a multi-run total for a single session's traffic. `get_body`/`list_bodies` also return each body's `sha256` (and, for a bounded read, `range_sha256` for exactly the bytes returned) so a specific claim can be checked against a fingerprint instead of taken on trust.
+
+### Auditing the agent without asking it
+
+`firetoll` is a separate, read-only console script over the same store, usable whether or not `firetoll-mcp` is running:
+
+```console
+uv run firetoll sessions
+uv run firetoll audit
+uv run firetoll flows --host api.anthropic.com
+uv run firetoll bodies --flow-id <id>
+```
+
+`firetoll audit` prints `tool_log` directly from the SQLite file. This is deliberate: an MCP server auditing itself, or an agent reporting its own past reads, is not independent evidence. `firetoll audit` reads the same file a raw `sqlite3`/`python3 -c 'import sqlite3...'` script would, which is also the honest limit of any of this: a process with filesystem access to the store can always read it directly, and that read will never appear in `tool_log`. `session_overview`'s `limits` field says so explicitly rather than implying a guarantee this design can't make.
+
+### What Firetoll detects
+
+- Telemetry and analytics sinks, including corpus signatures and JSON event heuristics.
+- AI-agent egress, including provider requests, MCP JSON-RPC, model identifiers, byte counts, and WebSocket upgrade handshakes.
+- Trackers and identity joins: the same identifier observed across multiple eTLD+1 domains.
+- Bot detection and fingerprinting signals, plus a stable TLS client-profile hash.
+- x402 `402 Payment Required` offers, with normalized network identifiers and a dry-run cost quote.
+
+Each finding has a class, label, confidence (`signature` or `heuristic`), and non-empty evidence describing the header, path, or body key that triggered it.
+
+### Privacy and evidence boundaries
+
+Metadata and findings are stored by default; bodies are not. Enable bounded body capture explicitly:
+
+```console
+mitmdump \
+  --set firetoll_store_bodies=true \
+  --set firetoll_body_access=redacted
+```
+
+`redacted` removes prompt/completion fields, secret-named JSON fields, common credentials, emails, IP addresses, phone numbers, and card-shaped values before storage. Captured bodies are capped at 64 KiB. `full` stores raw bodies and is intended only for a deliberate, audited local workflow; MCP body reads are logged. `none` refuses body reads even when bodies exist.
+
+The report explicitly counts unattributed flows, CONNECT-only flows, streamed bodies, truncation, and the fact that WebSocket frame capture is off by default. An absent finding means “not observed by this capture configuration,” not “safe” or “not present.”
+
+The store is mode `0600`, its directory is mode `0700`, identifier values are salted and hashed, and rows older than `firetoll_retention_hours` (24 by default) are deleted on startup and during periodic sweeps. To erase the current session, run `firetoll.wipe`.
+
+### Options
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `firetoll` | `true` | Enable enrichment, storage, and commands. |
+| `firetoll_attribution` | `true` | Resolve client sockets to local processes; fall back to User-Agent. |
+| `firetoll_store_bodies` | `false` | Capture request/response bodies after applying the selected access policy. |
+| `firetoll_body_access` | `redacted` | MCP body policy: `none`, `redacted`, or `full`. |
+| `firetoll_retention_hours` | `24` | Retention window for stored flow data. |
+| `firetoll_corpus_dir` | empty | Directory containing additional `telemetry.yaml` and `trackers.yaml` files. |
+| `firetoll_report` | `false` | Print a report when the proxy exits. |
+| `firetoll_report_path` | empty | Base path for JSON and Markdown exports. |
+| `firetoll_store_path` | platform default | Override the SQLite path. |
+
+Corpus files are data, not code. Bundled corpora can be extended at runtime with `--set firetoll_corpus_dir=/path/to/corpus`; supplied files are merged with the bundled files.
+
+### x402 boundary
+
+Firetoll decodes common x402 offer shapes, maps known network names to CAIP-2 identifiers, renders offers in the content view, and exposes a dry-run quote. It does not hold keys, sign authorizations, submit transactions, inject payment headers, replay requests, or claim settlement. The x402 feature is an observation and explanation layer.
+
+### Source layout
+
+```text
+mitmproxy/firetoll/
+  attribution.py       client connection → process/User-Agent attribution
+  classify/             telemetry, agent-egress, tracker, and bot detectors
+  enrich.py             detector orchestration and flow metadata
+  finding.py            evidence-backed finding contract
+  redact.py             body redaction and 64 KiB cap
+  store.py              permissioned SQLite store and retention
+  report.py             terminal, JSON, and Markdown reports
+  x402.py               offer parsing, detection, and dry-run quotes
+  x402_contentview.py   x402 content view
+  mcp/server.py         separate read-only stdio MCP server
+  cli.py                separate read-only console script (`firetoll`), no MCP dependency
+  data/                 bundled detector corpora
+test/mitmproxy/firetoll/ Firetoll unit and integration tests
+```
+
+The Firetoll CI job enforces a small upstream diff budget. New feature code and tests belong under the two Firetoll directories; core wiring is limited to the documented addon/contentview registration, packaging, repository documentation, workflow, and budget-check files.

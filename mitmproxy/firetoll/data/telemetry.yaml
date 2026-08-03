@@ -1,0 +1,72 @@
+# Firetoll telemetry/analytics-sink corpus.
+#
+# Original list, not derived from EasyList/EasyPrivacy or any other
+# GPL/CC-BY-SA blocklists must not be vendored into this corpus.
+# Extend or override by pointing --set firetoll_corpus_dir=<dir> at a
+# directory containing your own telemetry.yaml with the same shape; entries
+# are appended to, not replacing, this file.
+
+vendors:
+  - name: Segment
+    hosts:
+      - api.segment.io
+      - cdn.segment.com
+
+  - name: Amplitude
+    hosts:
+      - api.amplitude.com
+      - api2.amplitude.com
+
+  - name: Mixpanel
+    hosts:
+      - api.mixpanel.com
+      - api-js.mixpanel.com
+      - api-eu.mixpanel.com
+
+  - name: PostHog
+    hosts:
+      - app.posthog.com
+      - us.i.posthog.com
+      - eu.i.posthog.com
+
+  - name: Statsig
+    hosts:
+      - events.statsigapi.net
+      - api.statsig.com
+    host_suffixes:
+      - .statsig.com
+
+  - name: Sentry
+    path_patterns:
+      - "/api/\\d+/(store|envelope)/"
+
+  - name: Bugsnag
+    hosts:
+      - sessions.bugsnag.com
+      - notify.bugsnag.com
+
+  - name: Datadog RUM
+    host_suffixes:
+      - .browser-intake-datadoghq.com
+      - .browser-intake-datadoghq.eu
+
+  - name: LaunchDarkly
+    hosts:
+      - events.launchdarkly.com
+      - app.launchdarkly.com
+      - mobile.launchdarkly.com
+
+  - name: Google Analytics
+    hosts:
+      - www.google-analytics.com
+      - analytics.google.com
+    host_suffixes:
+      - .google-analytics.com
+
+  - name: Google Tag Manager
+    hosts:
+      - www.googletagmanager.com
+
+  - name: OTLP
+    path_patterns:
+      - "/v1/(traces|metrics|logs)$"

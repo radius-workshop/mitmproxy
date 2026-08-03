@@ -1,0 +1,18 @@
+[mcp_servers.neotoma-dev]
+enabled = false
+
+[mcp_servers.firetoll]
+# Disabled by default: Firetoll reads the local session database only when
+# the user explicitly starts the stdio server.
+enabled = false
+command = "uv"
+# Omitting --store-path uses Firetoll's default ~/.mitmproxy/firetoll/session.sqlite.
+args = ["run", "firetoll-mcp"]
+
+# Other common MCP servers here for convenience
+
+[mcp_servers.linear]
+enabled = false
+
+[mcp_servers.grafana]
+enabled = false

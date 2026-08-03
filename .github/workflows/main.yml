@@ -18,6 +18,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  firetoll-diff-budget:
+    name: firetoll diff budget
+    runs-on: ubuntu-latest
+    steps:
+      # mhils/workflows/checkout ignores fetch-depth and always checks out
+      # shallow (depth 1), which leaves no merge-base to diff against
+      # upstream. Use actions/checkout directly here so fetch-depth: 0 works.
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+      - run: git remote add upstream-mitmproxy https://github.com/mitmproxy/mitmproxy.git
+      - run: git fetch upstream-mitmproxy main
+      - run: python3 mitmproxy/firetoll/ci_diff_budget.py --base-ref upstream-mitmproxy/main
+
   tox:
     strategy:
       fail-fast: false
@@ -217,6 +231,7 @@ jobs:
   check:
     if: always()
     needs:
+    - firetoll-diff-budget
     - tox
     - test
     - test-docker
