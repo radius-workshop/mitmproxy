@@ -329,8 +329,8 @@ def _write_exports(report: Report, path: str) -> None:
     for suffix in (".json", ".md"):
         if base.endswith(suffix):
             base = base[: -len(suffix)]
-    with open(f"{base}.json", "w") as f:
+    with open(f"{base}.json", "w", encoding="utf-8") as f:
         json.dump(report.to_dict(), f, indent=2)
-    with open(f"{base}.md", "w") as f:
+    with open(f"{base}.md", "w", encoding="utf-8") as f:
         f.write(render_markdown(report))
     logging.log(ALERT, f"firetoll: report written to {base}.json and {base}.md")

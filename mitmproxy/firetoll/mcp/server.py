@@ -14,8 +14,6 @@ Install:
     claude mcp add firetoll -- firetoll-mcp
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
