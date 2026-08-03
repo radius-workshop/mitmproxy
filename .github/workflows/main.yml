@@ -18,6 +18,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  firetoll-diff-budget:
+    name: firetoll diff budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mhils/workflows/checkout@8fe88b311a66c441e01edfebe4cd90d8a47fa335
+        with:
+          fetch-depth: 0
+      - run: git remote add upstream-mitmproxy https://github.com/mitmproxy/mitmproxy.git
+      - run: git fetch upstream-mitmproxy main
+      - run: python3 mitmproxy/firetoll/ci_diff_budget.py --base-ref upstream-mitmproxy/main
+
   tox:
     strategy:
       fail-fast: false
@@ -217,6 +228,7 @@ jobs:
   check:
     if: always()
     needs:
+    - firetoll-diff-budget
     - tox
     - test
     - test-docker
