@@ -82,8 +82,6 @@ class Enrich:
                 continue
             content = body if full_access else redact.redact_bytes(body)
             content, truncated = redact.truncate(content, BODY_SIZE_CAP)
-            if truncated:
-                db.increment_counter("bodies_truncated")
             db.record_body(
                 flow_id=flow.id,
                 part=part,

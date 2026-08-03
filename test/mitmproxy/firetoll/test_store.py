@@ -1,5 +1,8 @@
 import asyncio
+import hashlib
+import json
 import os
+import sqlite3
 import stat
 import time
 
@@ -187,9 +190,87 @@ class TestStoreWrites:
             db.increment_counter("unattributed_flows")
             db.increment_counter("unattributed_flows", by=2)
             (value,) = db.conn.execute(
-                "SELECT unattributed_flows FROM session WHERE id = 1"
+                "SELECT unattributed_flows FROM sessions WHERE id = ?",
+                (db.session_id,),
             ).fetchone()
             assert value == 3
+        finally:
+            db.close()
+
+
+class TestSessions:
+    def test_open_creates_a_fresh_live_session(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            assert db.session_id is not None
+            assert db.is_live() is True
+        finally:
+            db.close()
+
+    def test_closing_a_session_does_not_leak_into_the_next_open(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first_session_id = first.session_id
+        first.close_session()
+        assert first.is_live() is False
+        first.close()
+
+        second = store.Store(db_path)
+        try:
+            # This is the bug a singleton session row caused: a new run must
+            # never see the previous run's ended_at.
+            assert second.session_id != first_session_id
+            assert second.is_live() is True
+        finally:
+            second.close()
+
+    def test_flows_are_scoped_to_the_session_that_wrote_them(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first.record_flow(
+            flow_id="f-old",
+            app_id=None,
+            method="GET",
+            host="h",
+            path="/",
+            status=200,
+            request_bytes=None,
+            response_bytes=None,
+        )
+        first.close_session()
+        first.close()
+
+        second = store.Store(db_path)
+        try:
+            second.record_flow(
+                flow_id="f-new",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+            )
+            (count,) = second.conn.execute(
+                "SELECT COUNT(*) FROM flows WHERE session_id = ?",
+                (second.session_id,),
+            ).fetchone()
+            assert count == 1
+            (total,) = second.conn.execute("SELECT COUNT(*) FROM flows").fetchone()
+            assert total == 2
+        finally:
+            second.close()
+
+    def test_wipe_starts_a_new_session(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            original_session_id = db.session_id
+            db.wipe()
+            assert db.session_id != original_session_id
+            assert db.is_live() is True
+            (count,) = db.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            assert count == 1
         finally:
             db.close()
 
@@ -269,6 +350,43 @@ class TestFindIdentityJoins:
         finally:
             db.close()
 
+    def test_session_id_scopes_to_flows_from_that_session(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first.record_flow(
+            flow_id="f1",
+            app_id=None,
+            method="GET",
+            host="a.com",
+            path="/",
+            status=200,
+            request_bytes=None,
+            response_bytes=None,
+        )
+        first.record_flow(
+            flow_id="f2",
+            app_id=None,
+            method="GET",
+            host="b.com",
+            path="/",
+            status=200,
+            request_bytes=None,
+            response_bytes=None,
+        )
+        first.record_identity(value="same-value", etld1="a.com", flow_id="f1")
+        first.record_identity(value="same-value", etld1="b.com", flow_id="f2")
+        first_session_id = first.session_id
+        first.close_session()
+        first.close()
+
+        second = store.Store(db_path)
+        try:
+            assert second.find_identity_joins(session_id=second.session_id) == []
+            assert len(second.find_identity_joins(session_id=first_session_id)) == 1
+            assert len(second.find_identity_joins()) == 1
+        finally:
+            second.close()
+
 
 class TestRetention:
     def test_enforce_retention_deletes_old_flows_and_cascades(self, tmp_path):
@@ -337,10 +455,14 @@ class TestBodiesAndAccessLog:
                 truncated=False,
                 redacted=True,
             )
-            content, truncated, redacted = db.get_body("f1", "response")
+            content, truncated, redacted, sha256, content_type = db.get_body(
+                "f1", "response"
+            )
             assert content == b"hello"
             assert truncated is False
             assert redacted is True
+            assert sha256 == hashlib.sha256(b"hello").hexdigest()
+            assert content_type == "text/plain"
         finally:
             db.close()
 
@@ -378,10 +500,13 @@ class TestBodiesAndAccessLog:
                 truncated=True,
                 redacted=False,
             )
-            content, truncated, redacted = db.get_body("f1", "request")
+            content, truncated, redacted, sha256, _content_type = db.get_body(
+                "f1", "request"
+            )
             assert content == b"second"
             assert truncated is True
             assert redacted is False
+            assert sha256 == hashlib.sha256(b"second").hexdigest()
         finally:
             db.close()
 
@@ -405,13 +530,15 @@ class TestBodiesAndAccessLog:
                 truncated=False,
                 redacted=True,
             )
-            content, truncated, redacted, total_bytes = db.get_body_window(
-                "f1", "response", offset=6, limit=5
+            content, truncated, redacted, total_bytes, sha256, content_type = (
+                db.get_body_window("f1", "response", offset=6, limit=5)
             )
             assert content == b"world"
             assert truncated is False
             assert redacted is True
             assert total_bytes == len(b"hello world")
+            assert sha256 == hashlib.sha256(b"hello world").hexdigest()
+            assert content_type == "text/plain"
         finally:
             db.close()
 
@@ -470,15 +597,24 @@ class TestBodiesAndAccessLog:
 
             filtered = db.list_body_metadata(flow_id="f1")
             assert len(filtered) == 1
-            body_flow_id, part, content_bytes, truncated, redacted, created_at = (
-                filtered[0]
-            )
+            (
+                body_flow_id,
+                part,
+                content_bytes,
+                truncated,
+                redacted,
+                created_at,
+                sha256,
+                content_type,
+            ) = filtered[0]
             assert body_flow_id == "f1"
             assert part == "request"
             assert content_bytes == 3
             assert truncated is False
             assert redacted is True
             assert created_at == 100.0
+            assert sha256 == hashlib.sha256(b"aaa").hexdigest()
+            assert content_type == "text/plain"
         finally:
             db.close()
 
@@ -487,26 +623,59 @@ class TestBodiesAndAccessLog:
         try:
             db.set_websocket_frames_captured(True)
             (value,) = db.conn.execute(
-                "SELECT websocket_frames_captured FROM session WHERE id = 1"
+                "SELECT websocket_frames_captured FROM sessions WHERE id = ?",
+                (db.session_id,),
             ).fetchone()
             assert value == 1
 
             db.set_websocket_frames_captured(False)
             (value,) = db.conn.execute(
-                "SELECT websocket_frames_captured FROM session WHERE id = 1"
+                "SELECT websocket_frames_captured FROM sessions WHERE id = ?",
+                (db.session_id,),
             ).fetchone()
             assert value == 0
         finally:
             db.close()
 
-    def test_record_access_and_list_access_log(self, tmp_path):
+    def test_record_tool_call_and_list_tool_log(self, tmp_path):
         db = store.Store(tmp_path / "session.sqlite")
         try:
-            db.record_access(flow_id="f1", part="response", mode="redacted")
-            db.record_access(flow_id="f2", part="request", mode="full")
-            rows = db.list_access_log()
+            db.record_tool_call(
+                tool="get_body",
+                args={"flow_id": "f1"},
+                flow_id="f1",
+                part="response",
+                mode="redacted",
+            )
+            db.record_tool_call(
+                tool="get_body",
+                args={"flow_id": "f2"},
+                flow_id="f2",
+                part="request",
+                mode="full",
+                row_count=1,
+                bytes_returned=42,
+            )
+            rows = db.list_tool_log()
             assert len(rows) == 2
-            assert rows[0][0] == "f2"  # most recent first
+            tool, args_json, flow_id, part, mode, row_count, bytes_returned, session_id, called_at = rows[0]
+            assert tool == "get_body"
+            assert json.loads(args_json) == {"flow_id": "f2"}
+            assert flow_id == "f2"  # most recent first
+            assert row_count == 1
+            assert bytes_returned == 42
+            assert session_id == db.session_id
+        finally:
+            db.close()
+
+    def test_record_tool_call_defaults_args_to_empty_dict(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            db.record_tool_call(tool="session_overview")
+            (args_json,) = db.conn.execute(
+                "SELECT args_json FROM tool_log"
+            ).fetchone()
+            assert json.loads(args_json) == {}
         finally:
             db.close()
 
@@ -576,15 +745,48 @@ class TestReadOnlyStore:
         finally:
             reader.close()
 
-    def test_record_access_uses_separate_writable_connection(self, tmp_path):
+    def test_record_tool_call_uses_separate_writable_connection(self, tmp_path):
         path = tmp_path / "session.sqlite"
         store.Store(path).close()
         reader = store.ReadOnlyStore(path)
         try:
-            reader.record_access(flow_id="f1", part="response", mode="redacted")
-            rows = reader.list_access_log()
+            reader.record_tool_call(
+                tool="get_body", flow_id="f1", part="response", mode="redacted"
+            )
+            rows = reader.list_tool_log()
             assert len(rows) == 1
-            assert rows[0][0] == "f1"
+            assert rows[0][2] == "f1"  # flow_id
+        finally:
+            reader.close()
+
+    def test_defaults_to_the_most_recent_session(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        first = store.Store(path)
+        first_session_id = first.session_id
+        first.close_session()
+        first.close()
+        second = store.Store(path)
+        second_session_id = second.session_id
+        second.close()
+
+        reader = store.ReadOnlyStore(path)
+        try:
+            assert reader.session_id == second_session_id
+            assert reader.session_id != first_session_id
+        finally:
+            reader.close()
+
+    def test_session_id_is_none_when_store_has_no_sessions_rows(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        store.Store(path).close()
+        writable = sqlite3.connect(str(path))
+        writable.execute("DELETE FROM sessions")
+        writable.commit()
+        writable.close()
+
+        reader = store.ReadOnlyStore(path)
+        try:
+            assert reader.session_id is None
         finally:
             reader.close()
 
@@ -645,9 +847,30 @@ class TestWipe:
             assert db.conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == 0
             assert db.conn.execute("SELECT COUNT(*) FROM identities").fetchone()[0] == 0
             (unattributed,) = db.conn.execute(
-                "SELECT unattributed_flows FROM session WHERE id = 1"
+                "SELECT unattributed_flows FROM sessions WHERE id = ?", (db.session_id,)
             ).fetchone()
             assert unattributed == 0
+        finally:
+            db.close()
+
+    def test_wipe_preserves_the_tool_log_audit_trail(self, tmp_path):
+        db = store.Store(tmp_path / "session.sqlite")
+        try:
+            db.record_flow(
+                flow_id="flow-1",
+                app_id=None,
+                method="GET",
+                host="h",
+                path="/",
+                status=200,
+                request_bytes=None,
+                response_bytes=None,
+            )
+            db.record_tool_call(tool="get_body", flow_id="flow-1", part="response")
+
+            db.wipe()
+
+            assert db.conn.execute("SELECT COUNT(*) FROM tool_log").fetchone()[0] == 1
         finally:
             db.close()
 
@@ -737,3 +960,167 @@ class TestFiretollStoreAddon:
             tctx.command(addon.wipe)
         assert addon.db is None
         assert "no open session store" in caplog.text
+
+
+class TestGuessContentType:
+    def test_empty_content_is_none(self):
+        assert store._guess_content_type(b"") is None
+
+    def test_json_object_prefix(self):
+        assert store._guess_content_type(b'{"a": 1}') == "application/json"
+
+    def test_json_array_prefix(self):
+        assert store._guess_content_type(b"[1, 2, 3]") == "application/json"
+
+    def test_sse_event_stream(self):
+        assert store._guess_content_type(b"event: message\ndata: {}\n\n") == "text/event-stream"
+
+    def test_plain_text(self):
+        assert store._guess_content_type(b"hello world") == "text/plain"
+
+    def test_binary_content(self):
+        assert store._guess_content_type(b"\xff\xfe\x00\x01") == "application/octet-stream"
+
+
+class TestSchemaMigration:
+    def _legacy_store(self, path) -> None:
+        """Build a store shaped like one from before sessions/tool_log/body
+        digests existed, so migration has something real to do."""
+        conn = sqlite3.connect(str(path))
+        conn.executescript(
+            """
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE session (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                started_at REAL NOT NULL,
+                ended_at REAL,
+                unattributed_flows INTEGER NOT NULL DEFAULT 0,
+                connect_only_flows INTEGER NOT NULL DEFAULT 0,
+                streamed_bodies INTEGER NOT NULL DEFAULT 0,
+                bodies_truncated INTEGER NOT NULL DEFAULT 0,
+                websocket_frames_captured INTEGER NOT NULL DEFAULT 0,
+                body_access TEXT NOT NULL DEFAULT 'redacted'
+            );
+            CREATE TABLE apps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                process TEXT, path TEXT, parent TEXT, source TEXT NOT NULL,
+                first_seen REAL NOT NULL,
+                UNIQUE(process, path, parent, source)
+            );
+            CREATE TABLE flows (
+                id TEXT PRIMARY KEY,
+                created_at REAL NOT NULL,
+                app_id INTEGER,
+                method TEXT, host TEXT, path TEXT, status INTEGER,
+                request_bytes INTEGER, response_bytes INTEGER,
+                tls_profile_hash TEXT
+            );
+            CREATE TABLE findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                flow_id TEXT NOT NULL, cls TEXT NOT NULL, label TEXT NOT NULL,
+                confidence TEXT NOT NULL, evidence TEXT NOT NULL, facts TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            CREATE TABLE identities (
+                value_hash TEXT NOT NULL, value_prefix TEXT NOT NULL,
+                etld1 TEXT NOT NULL, flow_id TEXT NOT NULL, seen_at REAL NOT NULL,
+                PRIMARY KEY (value_hash, etld1, flow_id)
+            );
+            CREATE TABLE bodies (
+                flow_id TEXT NOT NULL, part TEXT NOT NULL,
+                content BLOB NOT NULL,
+                truncated INTEGER NOT NULL DEFAULT 0,
+                redacted INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (flow_id, part)
+            );
+            CREATE TABLE access_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                flow_id TEXT NOT NULL, part TEXT NOT NULL, mode TEXT NOT NULL,
+                accessed_at REAL NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO session (id, started_at, ended_at) VALUES (1, 100.0, 200.0)"
+        )
+        conn.execute(
+            "INSERT INTO flows (id, created_at, host) VALUES ('legacy-flow', 100.0, 'h')"
+        )
+        conn.execute(
+            "INSERT INTO bodies (flow_id, part, content) VALUES ('legacy-flow', 'request', ?)",
+            (b'{"legacy": true}',),
+        )
+        conn.execute(
+            "INSERT INTO access_log (flow_id, part, mode, accessed_at) "
+            "VALUES ('legacy-flow', 'request', 'redacted', 150.0)"
+        )
+        conn.commit()
+        conn.close()
+
+    def test_migrates_a_pre_sessions_store_without_crashing(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        self._legacy_store(path)
+
+        db = store.Store(path)
+        try:
+            # The old singleton `session` row described a stale, now-closed
+            # session; a fresh run must not inherit it.
+            assert db.is_live() is True
+            assert db.session_id is not None
+
+            # Pre-existing flows predate session tracking - session_id is
+            # left NULL rather than fabricated, and the data is not lost.
+            (session_id,) = db.conn.execute(
+                "SELECT session_id FROM flows WHERE id = 'legacy-flow'"
+            ).fetchone()
+            assert session_id is None
+
+            # Digests are backfilled since they're derivable from stored bytes.
+            (sha256, content_type) = db.conn.execute(
+                "SELECT sha256, content_type FROM bodies WHERE flow_id = 'legacy-flow'"
+            ).fetchone()
+            assert sha256 == hashlib.sha256(b'{"legacy": true}').hexdigest()
+            assert content_type == "application/json"
+
+            # The old audit trail is carried into tool_log, not discarded.
+            rows = db.list_tool_log()
+            assert len(rows) == 1
+            tool, _args, flow_id, part, mode, _rc, _br, _sid, called_at = rows[0]
+            assert tool == "get_body"
+            assert flow_id == "legacy-flow"
+            assert part == "request"
+            assert mode == "redacted"
+            assert called_at == 150.0
+        finally:
+            db.close()
+
+    def test_migration_is_idempotent(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        self._legacy_store(path)
+
+        store.Store(path).close()
+        db = store.Store(path)
+        try:
+            assert db.conn.execute("SELECT COUNT(*) FROM tool_log").fetchone()[0] == 1
+        finally:
+            db.close()
+
+    def test_legacy_session_table_is_dropped(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        self._legacy_store(path)
+        store.Store(path).close()
+
+        conn = sqlite3.connect(str(path))
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            assert "session" not in tables
+            assert "access_log" not in tables
+            assert "sessions" in tables
+            assert "tool_log" in tables
+        finally:
+            conn.close()

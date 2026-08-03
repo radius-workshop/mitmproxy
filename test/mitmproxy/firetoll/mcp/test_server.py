@@ -100,6 +100,20 @@ class TestSessionOverview:
         assert overview["flow_count"] == 2
         assert overview["app_count"] == 1
 
+    def test_reports_is_live_and_limits(self, populated_db):
+        overview = server.session_overview()
+        assert overview["is_live"] is True
+        assert overview["session_id"] == populated_db.session_id
+        assert "audit_scope" in overview["limits"]
+        assert "truncation" in overview["limits"]
+        assert "redacted" in overview["limits"]["body_access"]
+
+    def test_is_logged(self, populated_db):
+        server.session_overview()
+        log = server.tool_log()
+        assert len(log) == 1
+        assert log[0]["tool"] == "session_overview"
+
 
 class TestListApps:
     def test_returns_app_rows(self, populated_db):
@@ -250,7 +264,8 @@ class TestRedactionReport:
 class TestGetBody:
     def test_none_mode_refuses(self, populated_db):
         populated_db._audit_conn.execute(
-            "UPDATE session SET body_access = 'none' WHERE id = 1"
+            "UPDATE sessions SET body_access = 'none' WHERE id = ?",
+            (populated_db.session_id,),
         )
         populated_db._audit_conn.commit()
         result = server.get_body("flow-1", "response")
@@ -278,6 +293,22 @@ class TestGetBody:
         assert result["content"] == "cted"
         assert result["offset"] == 4
 
+    def test_includes_sha256_and_range_sha256(self, populated_db):
+        import hashlib
+
+        whole = b"redacted stuff"
+        result = server.get_body("flow-1", "response")
+        assert result["sha256"] == hashlib.sha256(whole).hexdigest()
+        assert result["range_sha256"] == hashlib.sha256(whole).hexdigest()
+
+        windowed = server.get_body("flow-1", "response", limit=4)
+        assert windowed["sha256"] == hashlib.sha256(whole).hexdigest()
+        assert windowed["range_sha256"] == hashlib.sha256(whole[:4]).hexdigest()
+
+    def test_content_type_is_reported(self, populated_db):
+        result = server.get_body("flow-1", "response")
+        assert result["content_type"] == "text/plain"
+
     def test_body_window_limits_are_validated(self, populated_db):
         with pytest.raises(ValueError):
             server.get_body("flow-1", "response", offset=-1)
@@ -292,7 +323,8 @@ class TestGetBody:
 
     def test_full_mode_includes_warning(self, populated_db):
         populated_db._audit_conn.execute(
-            "UPDATE session SET body_access = 'full' WHERE id = 1"
+            "UPDATE sessions SET body_access = 'full' WHERE id = ?",
+            (populated_db.session_id,),
         )
         populated_db._audit_conn.commit()
         result = server.get_body("flow-1", "response")
@@ -301,9 +333,27 @@ class TestGetBody:
     def test_every_call_is_logged(self, populated_db):
         server.get_body("flow-1", "response")
         server.get_body("flow-1", "request")
-        log = server.access_log()
+        log = server.tool_log()
         assert len(log) == 2
         assert {entry["part"] for entry in log} == {"response", "request"}
+        assert {entry["tool"] for entry in log} == {"get_body"}
+
+    def test_get_body_range_is_logged_under_its_own_name(self, populated_db):
+        server.get_body_range("flow-1", "response", offset=0, limit=4)
+        log = server.tool_log()
+        assert len(log) == 1
+        assert log[0]["tool"] == "get_body_range"
+
+    def test_logged_even_when_access_refused(self, populated_db):
+        populated_db._audit_conn.execute(
+            "UPDATE sessions SET body_access = 'none' WHERE id = ?",
+            (populated_db.session_id,),
+        )
+        populated_db._audit_conn.commit()
+        server.get_body("flow-1", "response")
+        log = server.tool_log()
+        assert len(log) == 1
+        assert log[0]["mode"] == "none"
 
 
 class TestListBodies:
@@ -317,6 +367,8 @@ class TestListBodies:
                 "truncated": False,
                 "redacted": True,
                 "created_at": bodies[0]["created_at"],
+                "sha256": bodies[0]["sha256"],
+                "content_type": "text/plain",
             }
         ]
 
@@ -329,16 +381,52 @@ class TestListBodies:
         with pytest.raises(ValueError):
             server.list_bodies(limit=1001)
 
+    def test_invalid_limit_is_not_logged(self, populated_db):
+        try:
+            server.list_bodies(limit=0)
+        except ValueError:
+            pass
+        assert server.tool_log() == []
 
-class TestAccessLog:
+
+class TestToolLog:
     def test_empty_by_default(self, populated_db):
-        assert server.access_log() == []
+        assert server.tool_log() == []
 
     def test_records_after_get_body(self, populated_db):
         server.get_body("flow-1", "response")
-        log = server.access_log()
+        log = server.tool_log()
         assert len(log) == 1
         assert log[0]["flow_id"] == "flow-1"
+
+    def test_records_every_other_tool_call_with_its_args(self, populated_db):
+        server.query_flows(host="api.anthropic.com")
+        server.list_apps()
+        log = server.tool_log()
+        assert len(log) == 2
+        tools = {entry["tool"] for entry in log}
+        assert tools == {"query_flows", "list_apps"}
+        query_flows_entry = next(e for e in log if e["tool"] == "query_flows")
+        assert query_flows_entry["args"]["host"] == "api.anthropic.com"
+        assert query_flows_entry["row_count"] == 1
+
+    def test_does_not_log_itself(self, populated_db):
+        server.list_apps()
+        server.tool_log()
+        # calling tool_log() must not have appended its own call
+        assert len(server.tool_log()) == 1
+
+    def test_bytes_returned_is_none_for_a_non_json_serializable_result(
+        self, populated_db
+    ):
+        @server._logged
+        def _not_json_serializable():
+            return {"value": object()}
+
+        _not_json_serializable()
+        log = server.tool_log()
+        assert len(log) == 1
+        assert log[0]["bytes_returned"] is None
 
 
 class TestMain:

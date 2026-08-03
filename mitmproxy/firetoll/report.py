@@ -44,7 +44,18 @@ class FindingRow:
 
 
 @dataclass
+class SessionRow:
+    id: int
+    started_at: float
+    ended_at: float | None
+    is_live: bool
+    flow_count: int
+
+
+@dataclass
 class Report:
+    session_id: int | None
+    is_live: bool
     started_at: float
     ended_at: float | None
     flow_count: int
@@ -53,6 +64,7 @@ class Report:
     x402_offer_count: int
     apps: list[AppRow] = field(default_factory=list)
     findings: list[FindingRow] = field(default_factory=list)
+    sessions: list[SessionRow] = field(default_factory=list)
     unattributed_flows: int = 0
     connect_only_flows: int = 0
     streamed_bodies: int = 0
@@ -76,34 +88,77 @@ def _app_label(source: str | None, process: str | None, parent: str | None) -> s
 
 
 def build_report(db: Store) -> Report:
+    """Every total here is scoped to `db.session_id` - the one run that
+    opened this store instance - never an all-time or cross-run figure.
+    `is_live` reflects that session's own `ended_at`, which a fresh
+    per-run session row guarantees can't carry over a stale value from an
+    earlier run."""
     conn = db.conn
+    session_id = db.session_id
 
-    (
-        started_at,
-        ended_at,
-        unattributed,
-        connect_only,
-        streamed,
-        truncated,
-        ws_captured,
-        body_access,
-    ) = conn.execute(
+    row = conn.execute(
         """
-            SELECT started_at, ended_at, unattributed_flows, connect_only_flows,
-                   streamed_bodies, bodies_truncated, websocket_frames_captured, body_access
-            FROM session WHERE id = 1
-            """
+        SELECT started_at, ended_at, unattributed_flows, connect_only_flows,
+               streamed_bodies, websocket_frames_captured, body_access
+        FROM sessions WHERE id = ?
+        """,
+        (session_id,),
     ).fetchone()
+    if row is None:
+        started_at = time.time()
+        ended_at = None
+        unattributed = connect_only = streamed = ws_captured = 0
+        body_access = "redacted"
+    else:
+        (
+            started_at,
+            ended_at,
+            unattributed,
+            connect_only,
+            streamed,
+            ws_captured,
+            body_access,
+        ) = row
 
-    (flow_count,) = conn.execute("SELECT COUNT(*) FROM flows").fetchone()
+    (flow_count,) = conn.execute(
+        "SELECT COUNT(*) FROM flows WHERE session_id = ?", (session_id,)
+    ).fetchone()
     (app_count,) = conn.execute(
-        "SELECT COUNT(DISTINCT app_id) FROM flows WHERE app_id IS NOT NULL"
+        "SELECT COUNT(DISTINCT app_id) FROM flows WHERE session_id = ? AND app_id IS NOT NULL",
+        (session_id,),
     ).fetchone()
-    (finding_count,) = conn.execute("SELECT COUNT(*) FROM findings").fetchone()
+    (finding_count,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM findings fi
+        JOIN flows f ON f.id = fi.flow_id
+        WHERE f.session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
     (x402_count,) = conn.execute(
-        "SELECT COUNT(*) FROM findings WHERE cls = 'x402'"
+        """
+        SELECT COUNT(*) FROM findings fi
+        JOIN flows f ON f.id = fi.flow_id
+        WHERE f.session_id = ? AND fi.cls = 'x402'
+        """,
+        (session_id,),
     ).fetchone()
-    (bodies_stored,) = conn.execute("SELECT COUNT(*) FROM bodies").fetchone()
+    (bodies_stored,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM bodies b
+        JOIN flows f ON f.id = b.flow_id
+        WHERE f.session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+    (truncated,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM bodies b
+        JOIN flows f ON f.id = b.flow_id
+        WHERE f.session_id = ? AND b.truncated = 1
+        """,
+        (session_id,),
+    ).fetchone()
 
     apps = []
     for source, process, parent, count, hosts in conn.execute(
@@ -111,9 +166,11 @@ def build_report(db: Store) -> Report:
         SELECT a.source, a.process, a.parent, COUNT(*), GROUP_CONCAT(DISTINCT f.host)
         FROM flows f
         LEFT JOIN apps a ON f.app_id = a.id
+        WHERE f.session_id = ?
         GROUP BY f.app_id
         ORDER BY COUNT(*) DESC
-        """
+        """,
+        (session_id,),
     ):
         apps.append(
             AppRow(
@@ -133,9 +190,12 @@ def build_report(db: Store) -> Report:
             (SELECT fi2.label FROM findings fi2 WHERE fi2.cls = fi.cls LIMIT 1),
             GROUP_CONCAT(DISTINCT fi.confidence)
         FROM findings fi
+        JOIN flows f ON f.id = fi.flow_id
+        WHERE f.session_id = ?
         GROUP BY fi.cls
         ORDER BY COUNT(*) DESC
-        """
+        """,
+        (session_id,),
     ):
         confidence_set = set((confidences or "").split(","))
         confidence = confidence_set.pop() if len(confidence_set) == 1 else "mixed"
@@ -149,7 +209,7 @@ def build_report(db: Store) -> Report:
             )
         )
 
-    identity_joins = db.find_identity_joins()
+    identity_joins = db.find_identity_joins(session_id=session_id)
     if identity_joins:
         _value_hash, value_prefix, etlds, _flow_ids = identity_joins[0]
         findings.append(
@@ -167,7 +227,27 @@ def build_report(db: Store) -> Report:
         finding_count += len(identity_joins)
     findings.sort(key=lambda row: row.count, reverse=True)
 
+    sessions = [
+        SessionRow(
+            id=sid,
+            started_at=s_started_at,
+            ended_at=s_ended_at,
+            is_live=s_ended_at is None,
+            flow_count=s_flow_count,
+        )
+        for sid, s_started_at, s_ended_at, s_flow_count in conn.execute(
+            """
+            SELECT s.id, s.started_at, s.ended_at, COUNT(f.id)
+            FROM sessions s LEFT JOIN flows f ON f.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id DESC
+            """
+        )
+    ]
+
     return Report(
+        session_id=session_id,
+        is_live=db.is_live(),
         started_at=started_at,
         ended_at=ended_at,
         flow_count=flow_count,
@@ -176,6 +256,7 @@ def build_report(db: Store) -> Report:
         x402_offer_count=x402_count,
         apps=apps,
         findings=findings,
+        sessions=sessions,
         unattributed_flows=unattributed,
         connect_only_flows=connect_only,
         streamed_bodies=streamed,
@@ -200,7 +281,8 @@ def _duration(started_at: float, ended_at: float | None) -> str:
 def render_text(report: Report) -> str:
     lines = []
     window = f"{_fmt_time(report.started_at)} → {_fmt_time(report.ended_at or time.time())} ({_duration(report.started_at, report.ended_at)})"
-    lines.append(f"FIRETOLL — session report            {window}")
+    status = "LIVE" if report.is_live else "ENDED"
+    lines.append(f"FIRETOLL — session report [{status}]  {window}")
     lines.append("")
     lines.append(
         f"  {report.flow_count} flows"
@@ -255,6 +337,7 @@ def render_markdown(report: Report) -> str:
     lines = [
         "# Firetoll session report",
         "",
+        f"- Status: {'live (still capturing)' if report.is_live else 'ended'}",
         f"- Window: {_fmt_time(report.started_at)} → "
         f"{_fmt_time(report.ended_at or time.time())} "
         f"({_duration(report.started_at, report.ended_at)})",

@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -274,7 +275,8 @@ class TestEnrichStoreIntegration:
             enrich_addon.response(f)
 
             (count,) = store_addon.db.conn.execute(
-                "SELECT unattributed_flows FROM session WHERE id = 1"
+                "SELECT unattributed_flows FROM sessions WHERE id = ?",
+                (store_addon.db.session_id,),
             ).fetchone()
             assert count == 1
             store_addon.done()
@@ -316,10 +318,14 @@ class TestEnrichBodyCapture:
             )
             enrich_addon.response(f)
 
-            content, truncated, redacted = store_addon.db.get_body(f.id, "response")
+            content, truncated, redacted, sha256, content_type = store_addon.db.get_body(
+                f.id, "response"
+            )
             assert b"a secret prompt" not in content
             assert redacted is True
             assert truncated is False
+            assert sha256 is not None
+            assert content_type == "application/json"
             store_addon.done()
 
     @pytest.mark.asyncio
@@ -340,9 +346,13 @@ class TestEnrichBodyCapture:
             )
             enrich_addon.response(f)
 
-            content, truncated, redacted = store_addon.db.get_body(f.id, "response")
+            content, truncated, redacted, sha256, content_type = store_addon.db.get_body(
+                f.id, "response"
+            )
             assert content == body
             assert redacted is False
+            assert sha256 == hashlib.sha256(body).hexdigest()
+            assert content_type == "application/json"
             store_addon.done()
 
     @pytest.mark.asyncio
@@ -363,13 +373,15 @@ class TestEnrichBodyCapture:
             )
             enrich_addon.response(f)
 
-            content, truncated, _redacted = store_addon.db.get_body(f.id, "response")
+            content, truncated, _redacted, _sha256, _content_type = (
+                store_addon.db.get_body(f.id, "response")
+            )
             assert len(content) == enrich.BODY_SIZE_CAP
             assert truncated is True
-            (bodies_truncated,) = store_addon.db.conn.execute(
-                "SELECT bodies_truncated FROM session WHERE id = 1"
+            (truncated_count,) = store_addon.db.conn.execute(
+                "SELECT COUNT(*) FROM bodies WHERE truncated = 1"
             ).fetchone()
-            assert bodies_truncated == 1
+            assert truncated_count == 1
             store_addon.done()
 
     @pytest.mark.asyncio

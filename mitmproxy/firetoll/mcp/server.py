@@ -7,14 +7,18 @@ an agent's questions about a Firetoll session - live or finished.
 It must never sit in the data path: it does not run inside the proxy, it
 cannot widen its own body access (`firetoll_body_access` is read from the
 store, set only by the human running mitmproxy - see `enrich.py`), and
-every `get_body` call is written to `access_log` so the human can audit
-what the agent actually read.
+every tool call is written to `tool_log` so the human can audit what the
+agent actually asked and read - independently, with `firetoll audit`
+(mitmproxy/firetoll/cli.py), which does not depend on this server running.
 
 Install:
     claude mcp add firetoll -- firetoll-mcp
 """
 
 import argparse
+import functools
+import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -25,7 +29,22 @@ from mitmproxy.firetoll import store
 from mitmproxy.firetoll.report import _app_label
 from mitmproxy.firetoll.report import build_report
 
-mcp = FastMCP("firetoll")
+INSTRUCTIONS = """
+Call session_overview first, every time - it reports is_live and the
+session window, and neither should ever be assumed. Cite flow_id, and for
+any body content the sha256 (or range_sha256 for a partial read), for every
+specific claim: those are the only parts of an answer the human can
+recheck. Never assert something beyond the rows a tool actually returned;
+name the tool that produced each claim. Every call made through this server
+is written to tool_log; a direct read of the SQLite file bypasses that log
+entirely and is not detectable from inside this process - if you ever read
+the store file directly instead of through a tool here, disclose that
+immediately, not as an afterthought. Treat an absent finding as "not
+observed under this capture configuration," never as "safe" or "absent
+from the traffic."
+""".strip()
+
+mcp = FastMCP("firetoll", instructions=INSTRUCTIONS)
 
 DEFAULT_BODY_READ_BYTES = 4 * 1024
 MAX_BODY_READ_BYTES = 64 * 1024
@@ -41,14 +60,63 @@ def _require_db() -> store.ReadOnlyStore:
     return _db
 
 
+def _logged(fn):
+    """Write one `tool_log` row per call, after it returns - never for a
+    call that raised, so a rejected/invalid request isn't reported as a
+    successful read. `get_body`/`get_body_range` log themselves explicitly
+    instead, since they must log even a refused (body_access=none) read."""
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        bound = sig.bind_partial(*args, **kwargs)
+        bound.apply_defaults()
+        row_count = len(result) if isinstance(result, (list, tuple)) else None
+        try:
+            bytes_returned = len(json.dumps(result))
+        except TypeError:
+            bytes_returned = None
+        _require_db().record_tool_call(
+            tool=fn.__name__,
+            args=dict(bound.arguments),
+            row_count=row_count,
+            bytes_returned=bytes_returned,
+        )
+        return result
+
+    return wrapper
+
+
 @mcp.tool()
+@_logged
 def session_overview() -> dict:
-    """Session window, totals, per-class finding counts, and the
-    non-observability counters - what this session cannot show."""
-    return build_report(_require_db()).to_dict()
+    """Session window, is_live, totals, per-class finding counts, every
+    known session (not just the current one), and the non-observability
+    counters - what this session cannot show."""
+    result = build_report(_require_db()).to_dict()
+    result["limits"] = {
+        "audit_scope": (
+            "tool_log (see the tool_log tool, or `firetoll audit`) covers "
+            "reads made through this MCP server only. Anything with "
+            "filesystem access to the store path can read it directly "
+            "without that read ever appearing here."
+        ),
+        "truncation": (
+            "bodies over 64 KiB are truncated at capture; a truncated body's "
+            "content is a lower bound on what was actually sent, not the "
+            "whole message."
+        ),
+        "websocket": (
+            "off" if not result["websocket_frames_captured"] else "on"
+        ) + " by default: handshakes are seen in flow metadata, frame contents are not.",
+        "body_access": f"body_access is currently {result['body_access']!r}.",
+    }
+    return result
 
 
 @mcp.tool()
+@_logged
 def list_apps() -> list[dict]:
     """Attributed processes seen this session, with flow counts and
     destination hosts."""
@@ -59,6 +127,7 @@ def list_apps() -> list[dict]:
 
 
 @mcp.tool()
+@_logged
 def query_flows(
     app: str | None = None,
     host: str | None = None,
@@ -70,7 +139,7 @@ def query_flows(
     """Flow metadata rows - method, host, path, status, attributed app -
     never bodies. Filter by attributed app label, host, a finding class
     that was detected on the flow, response status, or a minimum
-    created_at timestamp."""
+    created_at timestamp. Unscoped by session - use since= to bound by time."""
     db = _require_db()
     query = (
         "SELECT DISTINCT f.id, f.created_at, f.method, f.host, f.path, f.status, "
@@ -115,6 +184,7 @@ def query_flows(
 
 
 @mcp.tool()
+@_logged
 def get_findings(
     cls: str | None = None,
     host: str | None = None,
@@ -165,10 +235,12 @@ def get_findings(
 
 
 @mcp.tool()
+@_logged
 def explain_identity_joins() -> list[dict]:
     """Identifier values seen under two or more distinct eTLD+1s, with the
     flow ids that carried them - a cross-site join computed from this
-    session's own traffic, not a blocklist."""
+    session's own traffic, not a blocklist. Unscoped by session: a join
+    across runs is often exactly the correlation worth surfacing."""
     return [
         {"value_prefix": value_prefix, "etld1s": etlds, "flow_ids": flow_ids}
         for _value_hash, value_prefix, etlds, flow_ids in _require_db().find_identity_joins()
@@ -176,6 +248,7 @@ def explain_identity_joins() -> list[dict]:
 
 
 @mcp.tool()
+@_logged
 def agent_activity() -> dict:
     """Rollup of AI-agent egress: providers/models seen, MCP method calls,
     WebSocket upgrade handshakes, and byte counts - never prompt or
@@ -217,6 +290,7 @@ def agent_activity() -> dict:
 
 
 @mcp.tool()
+@_logged
 def x402_offers() -> list[dict]:
     """Decoded x402 payment offers: amount, asset, network, resource,
     scheme, and a dry-run quote - never signed, no wallet involved."""
@@ -229,6 +303,7 @@ def x402_offers() -> list[dict]:
 
 
 @mcp.tool()
+@_logged
 def redaction_report() -> dict:
     """What gets redacted, and by which rule, so the model knows its own
     blind spots."""
@@ -246,8 +321,11 @@ def redaction_report() -> dict:
 
 
 @mcp.tool()
+@_logged
 def list_bodies(flow_id: str | None = None, limit: int = 100) -> list[dict]:
-    """List stored body metadata without returning body content."""
+    """List stored body metadata without returning body content. Includes
+    each body's sha256 and best-effort content_type, so a later get_body
+    call can be checked against a fingerprint quoted here."""
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
     return [
@@ -258,8 +336,10 @@ def list_bodies(flow_id: str | None = None, limit: int = 100) -> list[dict]:
             "truncated": truncated,
             "redacted": redacted,
             "created_at": created_at,
+            "sha256": sha256,
+            "content_type": content_type,
         }
-        for body_flow_id, part, content_bytes, truncated, redacted, created_at in _require_db().list_body_metadata(
+        for body_flow_id, part, content_bytes, truncated, redacted, created_at, sha256, content_type in _require_db().list_body_metadata(
             flow_id, limit
         )
     ]
@@ -284,15 +364,17 @@ def _validate_body_window(offset: int, limit: int) -> None:
         raise ValueError(f"limit must be between 1 and {MAX_BODY_READ_BYTES}")
 
 
-@mcp.tool()
-def get_body(flow_id: str, part: str, offset: int = 0, limit: int = DEFAULT_BODY_READ_BYTES) -> dict:
-    """The stored body for a flow's request or response. Gated by
-    firetoll_body_access: refuses when access is "none". Reads are bounded
-    by default; every call is written to access_log."""
+def _get_body_impl(flow_id: str, part: str, offset: int, limit: int, *, tool: str) -> dict:
     _validate_body_window(offset, limit)
     db = _require_db()
     access = db.get_body_access()
-    db.record_access(flow_id=flow_id, part=part, mode=access)
+    db.record_tool_call(
+        tool=tool,
+        args={"flow_id": flow_id, "part": part, "offset": offset, "limit": limit},
+        flow_id=flow_id,
+        part=part,
+        mode=access,
+    )
 
     if error := _body_access_error(access):
         return error
@@ -306,7 +388,7 @@ def get_body(flow_id: str, part: str, offset: int = 0, limit: int = DEFAULT_BODY
             )
         }
 
-    content, truncated, redacted, content_bytes = stored
+    content, truncated, redacted, content_bytes, sha256, content_type = stored
     result = {
         "flow_id": flow_id,
         "part": part,
@@ -315,6 +397,9 @@ def get_body(flow_id: str, part: str, offset: int = 0, limit: int = DEFAULT_BODY
         "content_bytes": content_bytes,
         "truncated": truncated,
         "redacted": redacted,
+        "sha256": sha256,
+        "content_type": content_type,
+        "range_sha256": hashlib.sha256(content).hexdigest() if content else None,
         "content": content.decode(errors="replace"),
     }
     if offset + len(content) < content_bytes:
@@ -328,18 +413,39 @@ def get_body(flow_id: str, part: str, offset: int = 0, limit: int = DEFAULT_BODY
 
 
 @mcp.tool()
-def get_body_range(flow_id: str, part: str, offset: int, limit: int) -> dict:
-    """Read an explicit bounded byte range from a stored body."""
-    return get_body(flow_id=flow_id, part=part, offset=offset, limit=limit)
+def get_body(flow_id: str, part: str, offset: int = 0, limit: int = DEFAULT_BODY_READ_BYTES) -> dict:
+    """The stored body for a flow's request or response. Gated by
+    firetoll_body_access: refuses when access is "none". Reads are bounded
+    by default; every call is written to tool_log, along with the sha256
+    of the whole body and the range_sha256 of exactly the bytes returned."""
+    return _get_body_impl(flow_id, part, offset, limit, tool="get_body")
 
 
 @mcp.tool()
-def access_log(limit: int = 100) -> list[dict]:
-    """Every get_body call made this session, so the human can audit the
-    agent."""
+def get_body_range(flow_id: str, part: str, offset: int, limit: int) -> dict:
+    """Read an explicit bounded byte range from a stored body."""
+    return _get_body_impl(flow_id, part, offset, limit, tool="get_body_range")
+
+
+@mcp.tool()
+def tool_log(limit: int = 100) -> list[dict]:
+    """Every MCP tool call made against this store, so the human can audit
+    the agent without asking the agent. Does not log itself."""
     return [
-        {"flow_id": flow_id, "part": part, "mode": mode, "accessed_at": accessed_at}
-        for flow_id, part, mode, accessed_at in _require_db().list_access_log(limit)
+        {
+            "tool": tool_name,
+            "args": json.loads(args_json) if args_json else {},
+            "flow_id": flow_id,
+            "part": part,
+            "mode": mode,
+            "row_count": row_count,
+            "bytes_returned": bytes_returned,
+            "session_id": session_id,
+            "called_at": called_at,
+        }
+        for tool_name, args_json, flow_id, part, mode, row_count, bytes_returned, session_id, called_at in _require_db().list_tool_log(
+            limit
+        )
     ]
 
 

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 from mitmproxy.firetoll import options
 from mitmproxy.firetoll import report
@@ -12,7 +13,11 @@ def _context(*addons):
 
 
 def _populated_store(tmp_path) -> store.Store:
-    db = store.Store(tmp_path / "session.sqlite")
+    return _populated_store_at(tmp_path / "session.sqlite")
+
+
+def _populated_store_at(path) -> store.Store:
+    db = store.Store(path)
     app_id = db.record_app(
         process="codex", path="/usr/local/bin/codex", parent=None, source="process"
     )
@@ -266,3 +271,98 @@ class TestFiretollReportAddon:
             assert (tmp_path / "done-out.json").exists()
             assert (tmp_path / "done-out.md").exists()
         db.close()
+
+
+class TestSessionScoping:
+    def test_report_is_scoped_to_the_current_session_only(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first.record_flow(
+            flow_id="old-flow",
+            app_id=None,
+            method="GET",
+            host="h",
+            path="/",
+            status=200,
+            request_bytes=None,
+            response_bytes=None,
+        )
+        first.close_session()
+        first.close()
+
+        second = _populated_store_at(db_path)
+        try:
+            r = report.build_report(second)
+            # The previous run's flow must not be counted as part of this
+            # session's totals.
+            assert r.flow_count == 2
+            assert r.session_id == second.session_id
+        finally:
+            second.close()
+
+    def test_is_live_reflects_the_current_session_only(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first.close_session()
+        first.close()
+
+        second = store.Store(db_path)
+        try:
+            r = report.build_report(second)
+            assert r.is_live is True
+        finally:
+            second.close()
+
+    def test_sessions_list_reports_every_session(self, tmp_path):
+        db_path = tmp_path / "session.sqlite"
+        first = store.Store(db_path)
+        first.close_session()
+        first.close()
+
+        second = store.Store(db_path)
+        try:
+            r = report.build_report(second)
+            assert {s.id for s in r.sessions} == {first.session_id, second.session_id}
+            live_by_id = {s.id: s.is_live for s in r.sessions}
+            assert live_by_id[first.session_id] is False
+            assert live_by_id[second.session_id] is True
+        finally:
+            second.close()
+
+    def test_render_text_shows_live_status(self, tmp_path):
+        db = _populated_store(tmp_path)
+        try:
+            r = report.build_report(db)
+            text = report.render_text(r)
+            assert "[LIVE]" in text
+        finally:
+            db.close()
+
+    def test_render_markdown_shows_status(self, tmp_path):
+        db = _populated_store(tmp_path)
+        try:
+            r = report.build_report(db)
+            md = report.render_markdown(r)
+            assert "Status: live" in md
+        finally:
+            db.close()
+
+
+class TestNoSessionRow:
+    def test_build_report_does_not_crash_with_no_session_row(self, tmp_path):
+        path = tmp_path / "session.sqlite"
+        store.Store(path).close()
+        conn = sqlite3.connect(str(path))
+        conn.execute("DELETE FROM sessions")
+        conn.commit()
+        conn.close()
+
+        reader = store.ReadOnlyStore(path)
+        try:
+            assert reader.session_id is None
+            r = report.build_report(reader)
+            assert r.flow_count == 0
+            assert r.is_live is False
+            assert r.body_access == "redacted"
+        finally:
+            reader.close()
