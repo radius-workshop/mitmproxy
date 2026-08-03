@@ -104,6 +104,7 @@ mitmproxy = "mitmproxy.tools.main:mitmproxy"
 mitmdump = "mitmproxy.tools.main:mitmdump"
 mitmweb = "mitmproxy.tools.main:mitmweb"
 firetoll-mcp = "mitmproxy.firetoll.mcp.server:main"
+firetoll = "mitmproxy.firetoll.cli:main"
 
 [project.entry-points.pyinstaller40]
 hook-dirs = "mitmproxy.utils.pyinstaller:hook_dirs"
