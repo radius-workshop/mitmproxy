@@ -114,6 +114,29 @@ class TestEnrichOrchestrator:
             a.running()
             assert a.detectors == []
 
+    def test_path_evidence_is_sanitized_before_metadata_attachment(self):
+        token = "123456789:AAExampleTelegramBotToken_0123456789"
+        finding = Finding(
+            cls="telemetry",
+            label="path-derived",
+            confidence="signature",
+            evidence=[f"path=/bot{token}/sendMessage?chat_id=987654321"],
+        )
+        a = enrich.Enrich()
+        with _context(a) as tctx:
+            tctx.configure(a)
+            a.detectors = [_StubDetector([finding])]
+            f = tflow.tflow(resp=True)
+            a.response(f)
+
+        evidence = f.metadata["firetoll.findings"][0]["evidence"]
+        assert evidence == [
+            "path=/bot<redacted:telegram-bot-token>/sendMessage"
+            "?chat_id=<redacted:query-value>"
+        ]
+        assert token not in json.dumps(f.metadata["firetoll.findings"])
+        assert evidence[0]
+
 
 class _StubIdentifierDetector(_StubDetector):
     def __init__(self, values):
@@ -279,6 +302,48 @@ class TestEnrichStoreIntegration:
                 (store_addon.db.session_id,),
             ).fetchone()
             assert count == 1
+            store_addon.done()
+
+    @pytest.mark.asyncio
+    async def test_flow_path_and_finding_evidence_are_sanitized_before_storage(
+        self, tmp_path
+    ):
+        token = "123456789:AAExampleTelegramBotToken_0123456789"
+        raw_path = f"/bot{token}/sendMessage?chat_id=987654321&text=private"
+        finding = Finding(
+            cls="telemetry",
+            label="path-derived",
+            confidence="signature",
+            evidence=[f"path={raw_path}"],
+        )
+        store_addon = store.FiretollStore()
+        enrich_addon = enrich.Enrich(store_addon)
+        with _context(store_addon, enrich_addon) as tctx:
+            tctx.options.firetoll_store_path = str(tmp_path / "s.sqlite")
+            store_addon.running()
+            enrich_addon.detectors = [_StubDetector([finding])]
+
+            f = tflow.tflow(
+                req=tutils.treq(host="api.telegram.org", path=raw_path), resp=True
+            )
+            enrich_addon.response(f)
+
+            (stored_path,) = store_addon.db.conn.execute(
+                "SELECT path FROM flows WHERE id = ?", (f.id,)
+            ).fetchone()
+            (stored_evidence,) = store_addon.db.conn.execute(
+                "SELECT evidence FROM findings WHERE flow_id = ?", (f.id,)
+            ).fetchone()
+            assert stored_path == (
+                "/bot<redacted:telegram-bot-token>/sendMessage"
+                "?chat_id=<redacted:query-value>&text=<redacted:query-value>"
+            )
+            assert token not in stored_path
+            assert "987654321" not in stored_path
+            assert "private" not in stored_path
+            assert token not in stored_evidence
+            assert "987654321" not in stored_evidence
+            assert "private" not in stored_evidence
             store_addon.done()
 
 

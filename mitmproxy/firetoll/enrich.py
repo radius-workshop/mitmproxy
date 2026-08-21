@@ -40,7 +40,19 @@ class Enrich:
         findings: list[Finding] = []
         for detector in self.detectors:
             try:
-                findings.extend(detector.detect(flow))
+                for finding in detector.detect(flow):
+                    findings.append(
+                        Finding(
+                            cls=finding.cls,
+                            label=finding.label,
+                            confidence=finding.confidence,
+                            evidence=[
+                                redact.sanitize_path_evidence(item)
+                                for item in finding.evidence
+                            ],
+                            facts=dict(finding.facts),
+                        )
+                    )
             except Exception:
                 logger.exception(
                     f"firetoll: detector {getattr(detector, 'name', detector)!r} "
@@ -131,7 +143,7 @@ class Enrich:
             app_id=app_id,
             method=flow.request.method,
             host=flow.request.pretty_host,
-            path=flow.request.path,
+            path=redact.sanitize_path(flow.request.path),
             status=flow.response.status_code,
             request_bytes=len(request_body) if request_body is not None else None,
             response_bytes=len(response_body) if response_body is not None else None,
