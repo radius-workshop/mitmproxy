@@ -168,6 +168,14 @@ The report explicitly counts unattributed flows, CONNECT-only flows, streamed bo
 
 The store is mode `0600`, its directory is mode `0700`, identifier values are salted and hashed, and rows older than `firetoll_retention_hours` (24 by default) are deleted on startup and during periodic sweeps. To erase the current session, run `firetoll.wipe`.
 
+Stored request paths are sanitized before they reach flow rows, findings,
+reports, or MCP results. Query parameter names are retained for route-shape
+analysis, but every query value is removed; credential-bearing, identifier,
+email, Telegram bot-token, and high-entropy path segments are replaced with
+explicit redaction markers. Detectors still inspect the original in-memory
+request so sanitization does not weaken matching, and only the sanitized
+evidence is persisted.
+
 ### Options
 
 | Option | Default | Purpose |

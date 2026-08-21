@@ -135,6 +135,60 @@ class TestTruncate:
         assert truncated is False
 
 
+class TestPathRedaction:
+    def test_query_names_retained_but_all_values_redacted(self):
+        path = "/v1/messages?api_key=super-secret&email=alice%40example.com&debug"
+        sanitized = redact.sanitize_path(path)
+        assert sanitized == (
+            "/v1/messages?api_key=<redacted:query-value>"
+            "&email=<redacted:query-value>&<redacted:query-value>"
+        )
+        assert "super-secret" not in sanitized
+        assert "alice" not in sanitized
+
+    def test_email_and_identifier_segments_redacted(self):
+        path = "/users/alice%40example.com/sessions/550e8400-e29b-41d4-a716-446655440000"
+        assert redact.sanitize_path(path) == (
+            "/users/<redacted:email>/sessions/<redacted:path-identifier>"
+        )
+
+    def test_telegram_bot_token_segment_redacted(self):
+        token = "123456789:AAExampleTelegramBotToken_0123456789"
+        sanitized = redact.sanitize_path(f"/bot{token}/sendMessage")
+        assert sanitized == "/bot<redacted:telegram-bot-token>/sendMessage"
+        assert token not in sanitized
+
+    def test_high_entropy_and_credential_value_segments_redacted(self):
+        path = "/downloads/aB3dE5fG7hJ9kL2mN4pQ6rS8/token/plain-looking-secret"
+        assert redact.sanitize_path(path) == (
+            "/downloads/<redacted:high-entropy-segment>/token/"
+            "<redacted:path-credential>"
+        )
+
+    def test_ordinary_stable_path_is_unchanged(self):
+        assert redact.sanitize_path("/v1/messages/batch-create") == (
+            "/v1/messages/batch-create"
+        )
+
+    def test_path_redaction_is_idempotent(self):
+        original = "/users/alice@example.com?token=secret#private"
+        once = redact.sanitize_path(original)
+        assert redact.sanitize_path(once) == once
+        assert once.count("<redacted:email>") == 1
+        assert once.count("<redacted:query-value>") == 1
+        assert once.count("<redacted:fragment>") == 1
+
+    def test_path_evidence_is_sanitized_without_changing_other_evidence(self):
+        token = "123456789:AAExampleTelegramBotToken_0123456789"
+        assert redact.sanitize_path_evidence(f"path=/bot{token}/sendMessage?q=x") == (
+            "path=/bot<redacted:telegram-bot-token>/sendMessage"
+            "?q=<redacted:query-value>"
+        )
+        assert redact.sanitize_path_evidence("host=api.telegram.org") == (
+            "host=api.telegram.org"
+        )
+
+
 class TestRulesCatalog:
     def test_rules_have_names_and_descriptions(self):
         assert len(redact.RULES) >= 8

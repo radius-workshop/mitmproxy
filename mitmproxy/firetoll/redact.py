@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 _PROMPT_KEYS = {"content", "prompt", "input", "completion", "text", "message"}
 _SECRET_KEYS = {
@@ -45,6 +48,30 @@ _PATTERNS = {
     # runs, and a 13-19 digit grouping is more specifically card-shaped.
     "card-number": re.compile(r"\b(?:\d[ -]?){13,19}\b"),
     "phone": re.compile(r"\+?\d[\d\-.\s]{7,}\d"),
+}
+
+_REDACTION_PLACEHOLDER = re.compile(r"^<redacted:[^>]+>$")
+_TELEGRAM_BOT_TOKEN = re.compile(r"^bot\d{6,12}:[A-Za-z0-9_-]{20,}$")
+_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_NUMERIC_IDENTIFIER = re.compile(r"^\d{6,}$")
+_TOKEN_ALPHABET = re.compile(r"^[A-Za-z0-9._~-]+$")
+_SAFE_QUERY_KEY = re.compile(r"^[A-Za-z0-9_.~\[\]-]{1,64}$")
+_PATH_EVIDENCE = re.compile(
+    r"^((?:request[-_ ]?)?path\s*[=:]\s*)(.*)$", re.IGNORECASE
+)
+_CREDENTIAL_ROUTE_SEGMENTS = {
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "bearer",
+    "password",
+    "secret",
+    "token",
 }
 
 
@@ -107,6 +134,97 @@ def _apply_patterns(text: str) -> str:
     for name, pattern in _PATTERNS.items():
         text = pattern.sub(f"<redacted:{name}>", text)
     return text
+
+
+def _looks_high_entropy(segment: str) -> bool:
+    """Identify token-like route segments without redacting ordinary words/slugs."""
+    if len(segment) < 20 or not _TOKEN_ALPHABET.fullmatch(segment):
+        return False
+    has_digit = any(char.isdigit() for char in segment)
+    has_symbol = any(char in "._~-" for char in segment)
+    has_mixed_case = any(char.islower() for char in segment) and any(
+        char.isupper() for char in segment
+    )
+    if not (has_digit or has_symbol or has_mixed_case):
+        return False
+    counts = Counter(segment)
+    entropy = -sum(
+        (count / len(segment)) * math.log2(count / len(segment))
+        for count in counts.values()
+    )
+    return entropy >= 3.5
+
+
+def _sanitize_path_segment(segment: str, *, credential_value: bool = False) -> str:
+    if not segment or _REDACTION_PLACEHOLDER.fullmatch(segment):
+        return segment
+    decoded = unquote(segment)
+    if credential_value:
+        return "<redacted:path-credential>"
+    if _TELEGRAM_BOT_TOKEN.fullmatch(decoded):
+        return "bot<redacted:telegram-bot-token>"
+    if _UUID.fullmatch(decoded) or _NUMERIC_IDENTIFIER.fullmatch(decoded):
+        return "<redacted:path-identifier>"
+    if _PATTERNS["email"].fullmatch(decoded):
+        return "<redacted:email>"
+    if any(pattern.search(decoded) for pattern in _PATTERNS.values()):
+        return "<redacted:path-secret>"
+    if _looks_high_entropy(decoded):
+        return "<redacted:high-entropy-segment>"
+    return segment
+
+
+def sanitize_path(path: str | None) -> str:
+    """Return a route-shaped request target with values and identifiers removed.
+
+    Query parameter names remain useful for understanding an endpoint, but query
+    values never survive. Credential-shaped, identifier-shaped, and high-entropy
+    path segments are replaced while ordinary stable route segments are retained.
+    """
+    if not path:
+        return "/"
+
+    path_and_query, separator, _fragment = path.partition("#")
+    route, query_separator, query = path_and_query.partition("?")
+    segments = route.split("/")
+    sanitized_segments: list[str] = []
+    previous_was_credential_key = False
+    for segment in segments:
+        sanitized = _sanitize_path_segment(
+            segment, credential_value=previous_was_credential_key
+        )
+        sanitized_segments.append(sanitized)
+        previous_was_credential_key = (
+            unquote(segment).lower() in _CREDENTIAL_ROUTE_SEGMENTS
+        )
+    sanitized_route = "/".join(sanitized_segments)
+
+    if query_separator:
+        sanitized_query: list[str] = []
+        for field in query.split("&"):
+            key, has_value, _value = field.partition("=")
+            decoded_key = unquote(key)
+            safe_key = (
+                decoded_key
+                if _SAFE_QUERY_KEY.fullmatch(decoded_key)
+                else "<redacted:query-key>"
+            )
+            if has_value:
+                sanitized_query.append(f"{safe_key}=<redacted:query-value>")
+            else:
+                sanitized_query.append("<redacted:query-value>")
+        sanitized_route += "?" + "&".join(sanitized_query)
+    if separator:
+        sanitized_route += "#<redacted:fragment>"
+    return sanitized_route
+
+
+def sanitize_path_evidence(evidence: str) -> str:
+    """Sanitize detector evidence whose value is a request path."""
+    match = _PATH_EVIDENCE.match(evidence)
+    if match is None:
+        return evidence
+    return match.group(1) + sanitize_path(match.group(2))
 
 
 _SSE_DATA_LINE = re.compile(rb"^data:[ \t]*(.*)$", re.MULTILINE)
